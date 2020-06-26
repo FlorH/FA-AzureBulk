@@ -16,8 +16,8 @@ $FASecret   = "uP/+B7c/q0XdFFzKjGWcxCR6ok9aiLUWjxz2OE24D1c="    #this is the sec
 #
 
 $Date = Get-Date
+$Script:ReportPath="C:\PSReports"
 $LogFile = "C:\PSReports\PSLogs\AZUpdateGrps-"+$date.tostring("MM")+"-"+$date.day+"-"+$date.year+".txt"
-$SkipLog = "C:\PSReports\PSlogs\AZUpdateGrps-Skipped-"+$date.tostring("MM")+"-"+$date.day+"-"+$date.year+".txt"
 out-file -FilePath $SkipLog -InputObject '"Name","DisplayName","Email"' -Force
 
 # this is where we get the group
@@ -55,6 +55,39 @@ Function fcn_Auth{
         $Script:FAauthToken = @{'Authorization'="$($FAOauth.token_type) $($FAOauth.access_token)"}
         fcn_AddLogEntry ("... Token granted")
 	}
+}
+
+Function fcn_GetGrpMembers{
+    Param($GrpList)
+    
+    $LookupGrpURL = $GraphGrpURL+"/"+$GrpList.ID+"/Members"
+    
+    Try{[Array]$MList = (Invoke-WebRequest -UseBasicParsing -Headers $Script:FAauthToken -Uri $LookupGrpURL -Method GET)}
+    Catch{fcn_AddErrorLogEntry ("%%% % Unable to get Group members to build backup file")
+        Continue}
+    
+    $Members = (ConvertFrom-Json -InputObject $Mlist.Content).Value
+    $MemFile = $Script:ReportPath+"\Backup\"+$GrpList.DisplayName+"-Members-"+$date.tostring("MM")+"-"+$date.day+"-"+$date.year+".txt"
+    If(Test-Path $MemFile){
+        $Entry = "################################################## "
+        out-file -FilePath $MemFile -InputObject $Entry -Append
+        $Entry = " "
+        out-file -FilePath $MemFile -InputObject $Entry -Append
+        $Entry = "      Additional run of the script   $DateTime"
+        out-file -FilePath $MemFile -InputObject $Entry -Append
+        $Entry = " "
+        out-file -FilePath $MemFile -InputObject $Entry -Append
+        $Entry = "################################################## "
+        out-file -FilePath $MemFile -InputObject $Entry -Append}
+    Else{
+        $Entry = "DisplayName,UPN,ID"
+        out-file -FilePath $MemFile -InputObject $Entry -force}
+
+    ForEach($Member in $Members){
+        $Entry = '"'+$member.DisplayName+'","'+$Member.userPrincipalName+'","'+$member.ID+'"'
+        out-file -FilePath $MemFile -InputObject $Entry -Append
+    }
+
 }
 
 Function fcn_UserCycleMail{
@@ -132,28 +165,33 @@ Function fcn_UserCycleUPN{
 Function fcn_AddUsertoGroup{
     Param($FoundUsers)
 
-    $NewMember=$null 
+    $NewMember=$null; $error.clear()
     $FoundUserURL = "https://graph.microsoft.com/beta/users/"+$FoundUsers.ID
     $JsonMember = @{
         "@odata.id" = $FoundUserURL
     } | ConvertTo-Json
 
     $AddUserURL = $GraphGrpURL+"/"+$GrpList.ID+"/members/`$ref"
-    #Try{$NewMember = Invoke-WebRequest -UseBasicParsing -Headers $FAauthToken -Uri $AddUserURL -Method POST -body $JsonMember -ContentType "application/json"}
-    #Catch{fcn_AddErrorLogEntry ("%%% % Unable to add user to group update skip file")
-    #    Continue}
+    Try{$NewMember = Invoke-WebRequest -UseBasicParsing -Headers $FAauthToken -Uri $AddUserURL -Method POST -body $JsonMember -ContentType "application/json"}
+    Catch{fcn_AddErrorLogEntry ("%%% % Unable to add user to group update skip file")
+        $RC = (convertfrom-json $Error.errordetails.message).error}
     
     If($NewMember.statuscode -eq 204){
        fcn_AddLogEntry ("... . POST returned status code: "+$NewMember.statuscode+" user added")
-       [Hashtable]$Script:results = @{Isvalid=$true}
+       $status="add"       
+    }
+    ElseIf($RC.message -like "*One or more added object references already exist for the following modified properties: 'members'.*"){
+        fcn_AddLogEntry ("...  % User is already a member of the group")
+        $status="skip"
     }
     Else{
         fcn_AddLogEntry ("%%% % Unable to add "+ $FoundUsers.displayname +" to group, adding to skip file")
         $Entry = '"'+$lookupUPN+'","'+$lookupDisplayName+'","'+$lookupMail+'"'
         out-file -FilePath $SkipLog -InputObject $Entry -Append
-        [Hashtable]$Script:results = @{Isvalid=$false}       
+        $status="failed"        
     }
 
+    [Hashtable]$Script:results = @{Status=$Status}       
 }
 
 ##################################################################################################
@@ -187,10 +225,14 @@ If($GrpList.count -ne 1){
 fcn_AddLogEntry ("... Group found")
 fcn_AddLogEntry ("... Group Detail: "+$GrpList.Displayname+" Desc: "+$GrpList.Description+" ObjectID: "+$GrpList.ObjectID)
 fcn_AddLogEntry ("... ")
+
+fcn_AddLogEntry ("... Dump group members into a file")
+fcn_GetGrpMembers $GrpList
+fcn_AddLogEntry ("... ")
 fcn_AddLogEntry ("... Found "+$List.count+" items in the input file")
 fcn_AddLogEntry ("... ")
 
-$addcnt=0;$skipcnt=0
+$addcnt=0; $skipcnt=0; $Failcnt=0
 ForEach($item in $List){
 
     $lookupURL = $null; $LookupUPN=$null; $LookupMail=$null; $lookupDisplayName=$null 
@@ -212,7 +254,7 @@ ForEach($item in $List){
         fcn_AddLogEntry ("... Match not found, adding to skip file")
         $Entry = '"'+$lookupUPN+'","'+$lookupDisplayName+'","'+$lookupMail+'"'
         out-file -FilePath $SkipLog -InputObject $Entry -Append
-        $skipcnt++     
+        $Failcnt++     
             Continue}
 
     # userPrincipalName": "aarmiller_republictitle.com#EXT#@firstam.onmicrosoft.com"
@@ -232,30 +274,31 @@ ForEach($item in $List){
             fcn_AddLogEntry ("... Single match found for "+$FoundUsers.DisplayName+" using "+$FoundUsers.UserPrincipalName)
             fcn_AddLogEntry (".......... this is where we add the user to the group")
             fcn_AddUsertoGroup $FoundUsers
-                $IsValid = $Script:results.IsValid
-            If($IsValid){$addcnt++}
-            Else{$skipcnt++}
-            
+                $Status = $Script:results.Status
+            If($Status -eq "add"){$addcnt++}
+            ElseIf($Status -eq "skip"){$skipcnt++}
+            Else{$failcnt++}            
         }
         Else{
             fcn_AddLogEntry ("... Still have more than one match found, add to skip file")
             $Entry = '"'+$lookupUPN+'","'+$lookupDisplayName+'","'+$lookupMail+'"'
             out-file -FilePath $SkipLog -InputObject $Entry -Append 
-            $skipcnt++
+            $Failcnt++
         }    
     }
     Else{
         fcn_AddLogEntry ("... $LookupUPN not found in Azure, add to skip file")
         $Entry = '"'+$lookupUPN+'","'+$lookupDisplayName+'","'+$lookupMail+'"'
         out-file -FilePath $SkipLog -InputObject $Entry -Append   
-        $skipcnt++     
+        $Failcnt++     
     }
     fcn_AddLogEntry ("...........................................................")
 }
 
 fcn_AddLogEntry ("...  ")
 fcn_AddLogEntry ("... Input file had "+$list.count+" total items")
-fcn_AddLogEntry ("... "+$addcnt+" were added, and "+$skipcnt+" were skipped")
+fcn_AddLogEntry ("... "+$addcnt+" were added, and "+$skipcnt+" were already members of the group")
+fcn_AddLogEntry ("... "+$failedcnt+" were not added and were plaaced in the skip file.")
 fcn_AddLogEntry ("... Script finished")
 fcn_AddLogEntry ("...  ")
 Write-Host " "
