@@ -59,7 +59,7 @@ $Props       = '?$select=AccountEnabled,displayName,givenName,surname,employeeId
 # Change this flag to $true to sync users based on email, do not verify if employeeID matches or exists
 #$Script:SyncOnly=$false 
 # Change this flag to $True to run the script in verify mode, will not change any data
-$Script:TestOnly=$true
+$Script:TestOnly=$false
 # When set to True script will only create new users, no updates or deletions of existing users
 $Script:NewUsersOnly=$false
 #
@@ -267,7 +267,7 @@ Function fcn_UpdateGuestAttributes{
         $EagleID = $tmpGuest.onPremisesExtensionAttributes.extensionAttribute10
     }
 
-    # EA13 is email address
+    # EA13 is SSO email address
     fcn_AddLogEntry ("... . Use "+$Script:EA13+" as EA13")
     
     $tmpEmployeeID=$null
@@ -298,7 +298,7 @@ Function fcn_UpdateGuestAttributes{
         GivenName=$tmpGuest.GivenName;
         employeeId=$tmpEmployeeID;
         extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute12 = $EagleID;
-        extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13 = $tmpEA13;
+        extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13 = $Script:EA13;
         companyName=$company;        
     } | ConvertTo-Json 
     
@@ -307,7 +307,7 @@ Function fcn_UpdateGuestAttributes{
     fcn_AddLogEntry ("... . surname             = "+$tmpGuest.SurName)
     fcn_AddLogEntry ("... . employeeId          = "+$tmpGuest.EmployeeID)
     fcn_AddLogEntry ("... . EagleID             = "+$EagleID)
-    fcn_AddLogEntry ("... . EA13 primary email  = "+$tmpEA13)
+    fcn_AddLogEntry ("... . EA13 SSO            = "+$Script:EA13)
     fcn_AddLogEntry ("... . companyName         = "+$company)
 
     $Error.clear()
@@ -661,7 +661,7 @@ Function fcn_ProcessUsers{
         }
         ElseIf($Tenant -eq $HWTenant){        
             #check email for FAHW
-            $Script:EA13 = $email
+            $Script:EA13 = $Gueston.PremisesExtensionAttributes.extensionAttribute13
             fcn_CheckFAHWeMail $Guest $tmpAuthToken
                 $IsValid = $Script:results.IsValid
                 If(!($Isvalid)){
@@ -762,14 +762,15 @@ Function fcn_ProcessUsers{
                 }
                 Else{fcn_AddLogEntry ("... . EalgeID not available on home tenant yet")}
     
-                If ($Script:EA13 -eq $Guest.onPremisesExtensionAttributes.extensionAttribute13){
-                    fcn_AddLogEntry ("... . EA13 on FA tenant is "+$Script:EA13)
+                If ($FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13 -eq $Guest.onPremisesExtensionAttributes.extensionAttribute13){
+                    fcn_AddLogEntry ("... . EA13 on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13)
                     fcn_AddLogEntry ("... . EA13 from $company tenant is "+$Guest.onPremisesExtensionAttributes.extensionAttribute13)
                 }
                 Else{    
                     fcn_AddLogEntry ("... . EA13 Missing or incorrect")
                     fcn_AddLogEntry ("... . EA13 on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13)
-                    fcn_AddLogEntry ("... . EA13 from $company tenant is "+$Script:EA13)
+                    fcn_AddLogEntry ("... . EA13 from $company tenant is "+$Guest.onPremisesExtensionAttributes.extensionAttribute13)
+                    $Script:EA13=$Guest.onPremisesExtensionAttributes.extensionAttribute13
                     $UpdateUser=$true
                 }
                             
