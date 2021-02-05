@@ -31,8 +31,8 @@ ScriptName:		    AZ-Create-Guests
 Author:			    Flor H
 Date Created: 		April 2019
 Reveiwer:			
-Date Released		04/03/2019
-Current Version:	00.80 
+Date Released		01/28/2021
+Current Version:	01.20 
 Usage : 			run the ps1 file
 ***************************************************************************************
 Version History
@@ -43,6 +43,9 @@ Date		User        Ver	    Description
     "extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13": "flherrera@firstam.com",
     "extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute12": "4763f9a3-bad0-4118-8fde-94a2575e045a",
     "extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute6": "CORP\\flherrera",
+11/15/2019  Flor H.     1.0     Added EagleID for Rep Title
+05/2020     Flor H      1.1     Added FCT
+1/28/2021   Flor H.     1.2     Added logic for Prometic email suffix for FCT
 #############################################################################################>
 
 #These URLs are used to access Graph and login, they do not change
@@ -124,18 +127,15 @@ $FCTCtrlGrpMembersGraphURL = $FCTCtrlGrpGraphURL+"/Members"+$Props
 ## Functions
 #################################################################################################
 $Script:Drive = "C:"
-$Script:ReportPath="$Script:Drive\PSReports"
-$Script:LogPath="$Script:ReportPath\PSLogs"
-if (!(Test-Path "$Script:Drive\PSReports" )){$null = New-Item -path "$Script:Drive\" -name "PSReports" -type directory}
-if (!(Test-Path "$Script:ReportPath\PSLogs")){$null = New-Item -path "$Script:ReportPath\" -name "PSLogs" -type directory}
+$Script:LogPath="$Script:Drive\Scripts\PSLogs"
+if (!(Test-Path "$Script:LogPath" )){$null = New-Item -path "$Script:Drive\Scripts" -name "PSLogs" -type directory}
 
 $LogDate = Get-Date -UFormat %m%d%Y
-$Script:LogFile="FAGuests-"+$LogDate+"Test.txt"
-$Script:LogNewUsers="FAGuests-NewUsers-"+$LogDate+"Test.txt"
-$Script:ErrorFile="FAGuests-"+$LogDate+"-ErrorsTest.txt"
-$Script:MissingAttribFAHW = "FAHWtoFAGuests-"+$LogDate+".txt"
-$Script:MissingAttribRT = "RepTitleToFAGuests-"+$LogDate+".txt"
-$Script:MissingAttribCan= "CanadaToFAGuests-"+$LogDate+".txt"
+$Script:LogFile=$LogDate+"-FAGuests.txt"
+$Script:ErrorFile=$LogDate+"-FAGuests-Errors.txt"
+$Script:MissingAttribFAHW = $LogDate+"-FAHW-NewUsers.txt"
+$Script:MissingAttribRT = $LogDate+"-RepTitle-NewUsers.txt"
+$Script:MissingAttribCan= $LogDate+"-FCT-NewUsers.txt"
 $Script:UseCorpEmail=$false 
 $Script:EA13=$null 
 
@@ -154,6 +154,13 @@ function fcn_AddErrorLogEntry {
 	param($Entry)
 	$DateTime = Get-Date -format "yyyy/MM/dd HH:mm"
     out-file -FilePath $Script:LogPath\$Script:ErrorFile -InputObject "$DateTime  $Entry" -Append	
+    fcn_AddLogEntry $Entry 
+}
+
+function fcn_AddNewUserLogEntry {
+	param($Entry)
+	$DateTime = Get-Date -format "yyyy/MM/dd HH:mm"
+    out-file -FilePath $Script:LogPath\$Script:NewUsersLog -InputObject "$DateTime  $Entry" -Append
     fcn_AddLogEntry $Entry 
 }
 
@@ -270,7 +277,7 @@ Function fcn_UpdateGuestAttributes{
     # EA13 is SSO email address
     $Entry = ("... . Use "+$Script:EA13+" as EA13")
     fcn_AddLogEntry $Entry 
-    If($Script:NewUser){out-file -FilePath $Script:LogPath\$Script:LogNewUsers -InputObject "$DateTime  $Entry" -Append}
+    #If($Script:NewUser){out-file -FilePath $Script:LogPath\$Script:LogNewUsers -InputObject "$DateTime  $Entry" -Append}
     
     $tmpEmployeeID=$null
     If($Script:EIDMatch){
@@ -320,7 +327,6 @@ Function fcn_UpdateGuestAttributes{
             $FALookupDetail = $tmpLookupDetail
         }
         Else{
-            fcn_AddLogEntry ("... . Update user")            
             $UpUser = (Invoke-WebRequest -UseBasicParsing -Headers $FAauthToken -Uri $UserBetaURL -Method PATCH -body $JsonUpdate -ContentType "application/json")
             $FALookupDetail = (ConvertFrom-Json -InputObject $UpUser.Content).value
         }
@@ -383,19 +389,11 @@ Function fcn_AddGuestToFA{
         sendInvitationMessage=$false;        
     } | ConvertTo-Json 
 
-    $Entry = ("... . These are the values which will be used to create new Guest User")
-    fcn_AddLogEntry $Entry 
-    out-file -FilePath $Script:LogPath\$Script:LogNewUsers -InputObject "$DateTime  $Entry" -Append
+    fcn_AddLogEntry ("... . These are the values which will be used to create new Guest User")
     $Entry = ("... . Invited User email  = "+$Script:InviteMail)
-    fcn_AddLogEntry $Entry 
-    out-file -FilePath $Script:LogPath\$Script:LogNewUsers -InputObject "$DateTime  $Entry" -Append
+    fcn_AddNewUserLogEntry $Entry 
     $Entry = ("... . Displayname         = "+$tmpGuest.DisplayName)
-    fcn_AddLogEntry $Entry 
-    out-file -FilePath $Script:LogPath\$Script:LogNewUsers -InputObject "$DateTime  $Entry" -Append
-
-    #$Entry = ("... . SSO eMail          = "+$Script:EA13)
-    #out-file -FilePath $Script:LogPath\$Script:LogNewUsers -InputObject "$DateTime  $Entry" -Append
-    #out-file -FilePath $Script:LogPath\$Script:LogNewUsers -InputObject "$DateTime  " -Append
+    fcn_AddNewUserLogEntry $Entry 
 
     $Error.clear()
     $Script:NewUser=$false 
@@ -406,7 +404,7 @@ Function fcn_AddGuestToFA{
     }
     Else{
         $NewUser=$null; [Array]$Content=$null; $NewUserOID=$null 
-        fcn_AddLogEntry ("... . Creating "+ $tmpGuest.DisplayName +" as Guest on FA Tenant")
+        fcn_AddNewUserLogEntry ("... . Creating "+ $tmpGuest.DisplayName +" as Guest on FA Tenant")
             
         Try{$NewUser = (Invoke-WebRequest -UseBasicParsing -Headers $FAauthToken -Uri $GraphInviteURL -Method POST -body $JsonInvite)}
         Catch{
@@ -426,10 +424,8 @@ Function fcn_AddGuestToFA{
         }
         
         $NewUserOID = $content.invitedUser.id
-        #write-host $content -ForegroundColor Yellow 
         fcn_AddLogEntry ("... . Newly created user Object ID: $NewUserOID")
-        fcn_AddLogEntry ("... . Creation Object ID: "+$content.ID )
-        fcn_AddLogEntry ("... . Invited eMail address: "+$content.invitedUserEmailAddress)
+        #fcn_AddLogEntry ("... . Invited eMail address: "+$content.invitedUserEmailAddress)
 
         $UserURL=$null; $ValUser=$null; [Array]$UserDetail=$null
         $UserURL = $GraphBetaUsersURL+$NewUserOID
@@ -541,32 +537,33 @@ Function fcn_SetMailToUPN{
 }
 
 Function fcn_CheckFAHWeMail{
-    Param($user, $tmpAuthToken)
+    Param($Guest, $tmpAuthToken)
 
     # FAHW Users are created in their tenant with a firstam.com email address
+
     # can't create guests users with our domain suffix i our tenant, use their tenants 
     # suffix for their email
 
     [Hashtable]$Script:results = @{IsValid=$True}
-    $SAM = $User.onPremisesSamAccountName
-    $email = $User.Mail
+    $SAM = $Guest.onPremisesSamAccountName
+    $Script:EA13 = $Guest.OnPremisesExtensionAttributes.extensionAttribute13
+    $email = $Guest.Mail
     $tmpMailName = $email.split("@")[0]
-    fcn_AddLogEntry ("... . Home Warranty user, need to double check email $email")
+    fcn_AddLogEntry ("... . Home Warranty user need additional mail validation, FA Guest email is $email")
     
     # Do the SamAccountName and Mail name match
     If($tmpMailName -ne $SAM){        
-        #fcn_AddErrorLogEntry ("### "+$User.DisplayName)
+        #fcn_AddErrorLogEntry ("### "+$Guest.DisplayName)
         $Script:InviteMail = $email.replace("@firstam.com","@fahw.com")
-        fcn_AddLogEntry ("... % eMail name mismatch for "+$User.DisplayName)
+        fcn_AddLogEntry ("... % eMail name mismatch for "+$Guest.DisplayName)
         fcn_AddLogEntry ("... % OnPremiseSamAccountName $SAM and email name "+$email+" do not match")
-        fcn_SetMailToUPN $User $SAM $tmpMailName $email $tmpAuthToken
+        fcn_SetMailToUPN $Guest $SAM $tmpMailName $email $tmpAuthToken
             $IsValid = $Script:results.IsValid
         If(!($Isvalid)){
             [Hashtable]$Script:results = @{IsValid=$false}
             fcn_AddErrorLogEntry ("### # skipping user ###")
             Continue 
         }
-
     }
     ElseIf($email -like "*@fahw.com"){
         #tenant only users have an @fahw email address.
@@ -604,7 +601,7 @@ Function fcn_ProcessUsers{
         #out-file -FilePath $Script:LogPath\$Script:HomeTenantLog -InputObject "$DateTime  $Entry" -Append 
     }
     ElseIf($Tenant -eq $FCTTenant){
-        $Company="First Canadian Title"
+        $Company="FCT"
         $Script:HomeTenantLog = $Script:MissingAttribCan
         #out-file -FilePath $Script:LogPath\$Script:HomeTenantLog -InputObject "$DateTime  $Entry" -Append 
     }
@@ -618,44 +615,45 @@ Function fcn_ProcessUsers{
     $cntC=0; $cntMissMatch=0; $cntU=0; $cntD=0; $cntSkip=0; $cntFound=0; $cntError=0;
     ForEach($Guest in $GuestList){
    
-        $cnt++; $Script:InviteMail=$null 
+        $cnt++; $Script:InviteMail=$null; $Script:UserHomeDetail = $Null
         $email = $Guest.Mail
-        $SAM = $Guest.onPremisesSamAccountName
-        #$Script:EA13=$null; $UsingUPN=$false 
-        fcn_AddLogEntry ("... ")
-        fcn_AddLogEntry ("... Checking "+$Guest.DisplayName)
-        fcn_AddLogEntry ("... . Assigned email in home tenant:  $email")
-        fcn_AddLogEntry ("... . on Premise SamAccountName:      $SAM")
-        fcn_AddLogEntry ("... . employee ID:                    "+$Guest.EmployeeID)
-        fcn_AddLogEntry ("... . EA13 RepTitle & HW:             "+$Guest.OnPremisesExtensionAttributes.extensionAttribute13)
-        fcn_AddLogEntry ("... . Eagle ID Rep Title:             "+$Guest.OnPremisesExtensionAttributes.extensionAttribute10)
-        fcn_AddLogEntry ("... . ")
-
+        
         #user is missing email skip 
         If($null -eq $email){
             $Entry = ("### # User "+$Guest.DisplayName+" missing email attribute "+$Guest.Mail+" ###")
             fcn_AddErrorLogEntry $Entry 
-                out-file -FilePath $Script:LogPath\$Script:HomeTenantLog -InputObject "$DateTime  $Entry" -Append
+            out-file -FilePath $Script:LogPath\$Script:HomeTenantLog -InputObject "$DateTime  $Entry" -Append
             $Entry = ("### # Unable to verify, user won't be invited as guest ###")
             fcn_AddErrorLogEntry $Entry 
-                out-file -FilePath $Script:LogPath\$Script:HomeTenantLog -InputObject "$DateTime  $Entry" -Append
-            $cntSkip++; Continue
-        }
-    
+            out-file -FilePath $Script:LogPath\$Script:HomeTenantLog -InputObject "$DateTime  $Entry" -Append
+            $cntSkip++; Continue}
+
         #lookup user on home tenant to get more information
         $UserURL = $GraphBetaUsersURL+$Guest.ID
-        
+                    
         #Skip if not found in home tenant or have other issue
-        fcn_AddLogEntry ("... . Get email details from home tenant")
+        fcn_AddLogEntry ("... . Get full details from home tenant")
         Try{$Script:tmpUser = (Invoke-WebRequest -UseBasicParsing -Headers $tmpAuthToken -Uri $UserURL -Method GET)
             $script:UserHomeDetail = (ConvertFrom-Json -InputObject $Script:tmpUser.Content)
-            #$script:UserHomeDetail = (ConvertFrom-Json -InputObject $tmpUser.Content).Value
         }
         Catch{$Script:UserHomeDetail = $Null
             fcn_AddLogEntry ("... . not found in home tenant")
-            Continue }
+            Continue}
+
+        #$Script:EA13=$null; $UsingUPN=$false 
+        $SAM = $Script:UserHomeDetail.onPremisesSamAccountName
+        fcn_AddLogEntry ("... ")
+        fcn_AddLogEntry ("... Checking "+$Script:UserHomeDetail.DisplayName+" from "+$Tenant)
+        fcn_AddLogEntry ("... . Assigned email in home tenant:  $email")
+        fcn_AddLogEntry ("... . on Premise SamAccountName:      $SAM")
+        fcn_AddLogEntry ("... . Cloud UPN is                    "+$Script:UserHomeDetail.userPrincipalName)
+        fcn_AddLogEntry ("... . employee ID:                    "+$Script:UserHomeDetail.EmployeeID)
+        fcn_AddLogEntry ("... . Eagle ID Rep Title:             "+$Script:UserHomeDetail.OnPremisesExtensionAttributes.extensionAttribute10)
+        #fcn_AddLogEntry ("... . ")
+    
             
-        #Figure out what to use as the invite email 
+        #Figure out what to use as the invite email
+        $Script:AdditionalProxy=$false
         If($Tenant -eq $RTTenant){
             If(($email -like "*@republictitle.com") -or ($email -like "*@reuniontitle.com") -or ($email -like "*@hklegal.net")){
                 $Script:InviteMail = $email
@@ -670,8 +668,7 @@ Function fcn_ProcessUsers{
         }
         ElseIf($Tenant -eq $HWTenant){        
             #check email for FAHW
-            $Script:EA13 = $Guest.OnPremisesExtensionAttributes.extensionAttribute13
-            fcn_CheckFAHWeMail $Guest $tmpAuthToken
+            fcn_CheckFAHWeMail $Script:UserHomeDetail $tmpAuthToken
                 $IsValid = $Script:results.IsValid
                 If(!($Isvalid)){
                     fcn_AddErrorLogEntry ("### # Remove existing guest account for "+$Guest.DisplayName+" before creating new")
@@ -681,15 +678,18 @@ Function fcn_ProcessUsers{
         }
         ElseIf($Tenant -eq $FCTTenant){
             
-            If($email -notlike "*@fct.ca"){
-                fcn_AddErrorLogEntry ("%%% . First Canadian Title - expecting @fct.ca suffix on email " + $email+" invalid email suffix Skipping user %%%")
-                $cntSkip++; Continue
+            If(($email -like "*@fct.ca") -or ($email -like "*@promeric.com")){ 
+                If($email -like "*@promeric.com"){$Script:AdditionalProxy=$true}   #add both firstcdn and promeric to additional email field
+                $Script:EA13 = $email
+                $FALookupEmail = $Script:UserHomeDetail.userPrincipalName
+                $Script:InviteMail = $Script:UserHomeDetail.userPrincipalName
+                $Company="FCT"
+                $EagleID=$null
             }
-            
-            $FALookupEmail = $Guest.Mail
-            $Script:InviteMail = $UserHomeDetail.UserPrincipalName
-            $Script:EA13 = $email
-            fcn_AddLogEntry ("... . FCT will use UPN for invite "+$Script:InviteMail)           
+            Else{
+                fcn_AddErrorLogEntry ("%%% . First Canadian Title - expecting @fct.ca suffix on email " + $email+" invalid email suffix Skipping user %%%")
+                Continue
+            } 
         }
         Else{
             fcn_AddLogEntry ("... Unknown or unexpected tenant $tenant")
@@ -697,13 +697,15 @@ Function fcn_ProcessUsers{
             $cntSkip++; Continue
         }
          
-        #Set variables to lookup guest user on FA tenant
+        fcn_AddLogEntry ("... . Invite email "+$Script:InviteMail)
+
+        #Set variables to lookup guest user on FA tenant to see if they already exist or if email is already in use
         $lookupBetaURL = $null; $Lookup=$null; $FALookupDetail=$null 
         $mailfilter = "`$filter=mail eq `'$FALookupEmail'"
         $lookupBetaURL = $GraphBetaUsersURL+'?'+$mailfilter
 
         #Try and lookup the guest user in FA first to see if the email already exist
-        fcn_AddLogEntry ("... . Lookup "+$Guest.DisplayName+" with email of "+$Script:InviteMail)
+        fcn_AddLogEntry ("... . Lookup "+$Guest.DisplayName+" with email of "+$FALookupEmail+ " on FA Tenant")
         Try{$Lookup = Invoke-WebRequest -UseBasicParsing -Headers $FAauthToken -Uri $lookupBetaURL -Method GET
             [Array]$FALookupDetail = (ConvertFrom-Json -InputObject $Lookup.Content).value 
         }
@@ -715,8 +717,8 @@ Function fcn_ProcessUsers{
         }
  
         #Did we find a user with the same email?
-        If($FALookupDetail.mail -eq $Script:InviteMail){
-            
+        If($FALookupDetail.mail -eq $FALookupEmail){
+            # we found an email match
             fcn_AddLogEntry ("... . eMail address found at FA")
                 
             If($Script:NewUsersOnly){
@@ -724,8 +726,8 @@ Function fcn_ProcessUsers{
                 Continue}
                 
             fcn_AddLogEntry ("... . Compare home tenant employeeID to FA tenant before making changes")
-            fcn_AddLogEntry ("... . Guest EmployeeID: "+$FALookupDetail.EmployeeID)
-            fcn_AddLogEntry ("... . $company EmployeeID: "+$Guest.EmployeeID)
+            fcn_AddLogEntry ("... .. Guest EmployeeID: "+$FALookupDetail.EmployeeID)
+            fcn_AddLogEntry ("... .. $company EmployeeID: "+$Script:UserHomeDetail.EmployeeID)
     
             If($FALookupDetail.EmployeeID -ne $Guest.EmployeeID){
                 #this user had a different employee ID, must be a different user delete existing and create new
@@ -757,51 +759,92 @@ Function fcn_ProcessUsers{
                 $UpdateUser=$false 
                 # EA12 is Eagle ID - right now only Republic Title has EagleID on EA10
                 If($company -eq "Republic Title"){
-                    If ($FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute12 -eq $Guest.onPremisesExtensionAttributes.extensionAttribute10){
+                    If ($FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute12 -eq $Script:UserHomeDetail.onPremisesExtensionAttributes.extensionAttribute10){
                         fcn_AddLogEntry ("... . EagleID on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute12)
-                        fcn_AddLogEntry ("... . EagleID from $company tenant is "+$Guest.onPremisesExtensionAttributes.extensionAttribute10)
+                        fcn_AddLogEntry ("... . EagleID from $company tenant is "+$Script:UserHomeDetail.onPremisesExtensionAttributes.extensionAttribute10)
                     }
                     Else{    
                         fcn_AddLogEntry ("... . EalgeID Missing or incorrect")
                         fcn_AddLogEntry ("... . EagleID on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute12)
-                        fcn_AddLogEntry ("... . EagleID from $company tenant is "+$Guest.onPremisesExtensionAttributes.extensionAttribute10)
+                        fcn_AddLogEntry ("... . EagleID from $company tenant is "+$Script:UserHomeDetail.onPremisesExtensionAttributes.extensionAttribute10)
                         $UpdateUser=$true
                     }
         
                 }
                 Else{fcn_AddLogEntry ("... . EalgeID not available on home tenant yet")}
     
-                If ($FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13 -eq $Guest.onPremisesExtensionAttributes.extensionAttribute13){
-                    fcn_AddLogEntry ("... . EA13 on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13)
-                    fcn_AddLogEntry ("... . EA13 from $company tenant is "+$Guest.onPremisesExtensionAttributes.extensionAttribute13)
+                #Check to see if EA13 is correct
+                If($Tenant -eq $HWTenant){
+                    If ($FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13 -eq $Script:EA13){
+                        fcn_AddLogEntry ("... .. EA13 on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13)
+                        fcn_AddLogEntry ("... .. EA13 from $company tenant is "+$Script:EA13)
+                    }
+                    Else{
+                        fcn_AddLogEntry ("... .. EA13 Missing or incorrect")
+                        fcn_AddLogEntry ("... .. EA13 on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13)
+                        fcn_AddLogEntry ("... .. EA13 from $company tenant is "+$Script:EA13)                        
+                        $UpdateUser=$true
+                    }
                 }
-                Else{    
-                    fcn_AddLogEntry ("... . EA13 Missing or incorrect")
-                    fcn_AddLogEntry ("... . EA13 on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13)
-                    fcn_AddLogEntry ("... . EA13 from $company tenant is "+$Guest.onPremisesExtensionAttributes.extensionAttribute13)
-                    $Script:EA13=$Guest.onPremisesExtensionAttributes.extensionAttribute13
-                    $UpdateUser=$true
+                If($Tenant -eq $FCTTenant){
+                    If ($null -eq $Script:UserHomeDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13){
+                        fcn_AddLogEntry ("... .. EA13 for $company is not set compare using FCT email")
+                        If ($FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13 -eq $email){
+                            fcn_AddLogEntry ("... .. EA13 on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13)
+                            fcn_AddLogEntry ("... .. EA13 (email) from $company tenant is "+$email)
+                            $Script:EA13 = $email
+                        }
+                        Else{
+                            fcn_AddLogEntry ("... .. EA13 Missing or incorrect")
+                            fcn_AddLogEntry ("... .. EA13 on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13)
+                            fcn_AddLogEntry ("... .. EA13 from $company tenant is "+$email)
+                            $Script:EA13=$email
+                            $UpdateUser=$true}
+                    }
+                    Else{
+                        If ($FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13 -eq $Script:UserHomeDetail.onPremisesExtensionAttributes.extensionAttribute13){
+                            fcn_AddLogEntry ("... .. EA13 on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13)
+                            fcn_AddLogEntry ("... .. EA13 from $company tenant is "+$Script:UserHomeDetail.onPremisesExtensionAttributes.extensionAttribute13)
+                        }
+                        Else{    
+                            fcn_AddLogEntry ("... .. EA13 Missing or incorrect")
+                            fcn_AddLogEntry ("... .. EA13 on FA tenant is "+$FALookupDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13)
+                            fcn_AddLogEntry ("... .. EA13 from $company tenant is "+$Script:UserHomeDetail.onPremisesExtensionAttributes.extensionAttribute13)
+                            $Script:EA13=$Script:UserHomeDetail.onPremisesExtensionAttributes.extensionAttribute13
+                            $UpdateUser=$true
+                        }
+                    }
                 }
                             
                 If(($null -eq $FALookupDetail.companyName ) `
                 -or ($FALookupDetail.companyName -ne $company)){
                     $UpdateUser=$true
-                    fcn_AddLogEntry ("... . Missing company name on FA tenant, update "+$FALookupDetail.companyName)
+                    fcn_AddLogEntry ("... . Missing or incorrect company name on FA tenant, update "+$FALookupDetail.companyName)
                 }
     
                 If($UpdateUser){
                     fcn_AddLogEntry ("... . Update user attributes")
-                    fcn_UpdateGuestAttributes $FALookupDetail.id $Guest $company $email $FALookupDetail
+                    fcn_UpdateGuestAttributes $FALookupDetail.id $Script:UserHomeDetail $company $email $FALookupDetail
+                }
+                Else{
+                    fcn_AddLogEntry ("... . No update required")
                 }
     
             }       #employee matches
         }
         Else{          
             fcn_AddLogEntry ("... . No user with email matching $email found on FA Tenant")
-            fcn_AddLogEntry ("... . next check FA Tenant to see if there is an employeeID match")
+            fcn_AddLogEntry ("... . Next check FA Tenant to see if there is an employeeID match")
                 
             #check here to see if we find match on EmployeeID, if we do then user was renamed employeeIDs are not reused.
-            If($FAGuests.EmployeeID -contains $Guest.EmployeeId){
+            If(($null -eq $Script:UserHomeDetail.EmployeeId) -and ($Tenant -eq $HWTenant) -and (($SAM -like "TE-*") -or ($SAM -like "SY-*"))){
+                #If home warranty and TE or SY users, no employee IDs only check using email.
+                fcn_AddLogEntry ("... . no match via email skipping employeeID check for HW for TE and SY")
+                fcn_AddGuestToFA $Script:UserHomeDetail $email $company 
+                    $IsValid = $Script:results.IsValid
+                    If($IsValid){$cntC++}Else{$cntError++}
+            }            
+            ElseIf($FAGuests.EmployeeID -contains $Script:UserHomeDetail.EmployeeId){
                         
                 # email did not match but} employeeID did, name change update account 
                 fcn_AddLogEntry ("... . eMail did not match but employee IDs did, this is a name change")
@@ -822,7 +865,7 @@ Function fcn_ProcessUsers{
             Else{
                 #match not found, create as new user
                 fcn_AddLogEntry ("... . no match via email or employeeID, adding new guest to FA")
-                fcn_AddGuestToFA $Guest $email $company 
+                fcn_AddGuestToFA $Script:UserHomeDetail $email $company 
                     $IsValid = $Script:results.IsValid
                 If($IsValid){$cntC++}Else{$cntError++}
             }
@@ -884,47 +927,31 @@ Function fcn_CheckForStaleUsers{
 ######################################################################################################################################
 
 Write-host "... "
-fcn_AddErrorLogEntry "..."
 
-$Entry = "=================================================================="
-#out-file -FilePath $Script:LogPath\$Script:MissingAttribFAHW -InputObject "$DateTime  $Entry" -Force	
-#out-file -FilePath $Script:LogPath\$Script:MissingAttribRT -InputObject "$DateTime  $Entry" -Force 
-fcn_AddErrorLogEntry $Entry
-
-$Entry = "... Ingest FA Employees from outside Tenants to Firstam Tenant"
-#out-file -FilePath $Script:LogPath\$Script:MissingAttribFAHW -InputObject "$DateTime  $Entry" -Append	
-#out-file -FilePath $Script:LogPath\$Script:MissingAttribRT -InputObject "$DateTime  $Entry" -Append  
-fcn_AddErrorLogEntry $Entry
-
-$Entry = "=================================================================="
-#out-file -FilePath $Script:LogPath\$Script:MissingAttribFAHW -InputObject "$DateTime  $Entry" -Append
-#out-file -FilePath $Script:LogPath\$Script:MissingAttribRT -InputObject "$DateTime  $Entry" -Append 
+fcn_AddErrorLogEntry ("==================================================================")
 
 fcn_AddLogEntry "..."
 fcn_AddErrorLogEntry "... Script Starting"
-fcn_AddLogEntry "..."
 If($Script:TestOnly){
     fcn_AddErrorLogEntry "***"
     fcn_AddErrorLogEntry "*** Test Only flag is set no errors should be logged only warnings"
     fcn_AddErrorLogEntry "***"
 }
 
-
+Return
 ################################################################################################################################
 # 2.0 Process the Home Warranty Users to invite them as Guests
 ################################################################################################################################
-
+$Script:NewUsersLog = $LogDate+"FAHW-NewUsers.txt"
+fcn_AddLogEntry "..."
 fcn_AddErrorLogEntry "... Starting Home Warranty"
 fcn_AddLogEntry "... ------------------------------"
-fcn_AddErrorLogEntry "... "
-fcn_AddLogEntry "... Auth to Home Warranty Tenant"
-fcn_AddErrorLogEntry "... "
+fcn_AddNewUserLogEntry "... Auth to Home Warranty Tenant"
 
 ##############################################################################
 # 2.1 This is where we authenticate and get our access token for Home Warrenty
 ##############################################################################
 $Error.clear()
-$Script:LogNewUsers="FAGuests-NewUsers-FAHW-"+$LogDate+".txt"
 
 $HWBody       = @{grant_type="client_credentials";resource=$resource;client_id=$HWappID;client_secret=$HWSecret}
 Try{$HWOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$HWTenant/oauth2/token?api-version=1.0 -Body $HWBody}
@@ -972,8 +999,27 @@ If(!($Isvalid)){
 fcn_AddErrorLogEntry ("... Home Warranty Group has "+$HWUsers.count+" members")
 fcn_AddLogEntry ("... ")
 
+
 ##############################################################################
-# 2.4 Cycle through the list to create new guests
+# 2.4 Get list of HW users already in FA Tenant
+##############################################################################
+
+[Array]$FAGuests=@()
+fcn_AddLogEntry ("... Get the Home Warranty control group from FA Tenant")
+fcn_GetAzureGroup $FAauthToken  $FAtoHWGuestsGrpGraphURL $FAtoHWGuestsMembersURL $FAListofHWGuests_GrpName $FATenant
+    $IsValid = $Script:results.IsValid
+    $FAGuests = $Script:results.GrpMembers
+
+If(!($Isvalid)){
+    fcn_AddLogEntry "### Error occurred getting list of Home Warranty FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
+}
+Else{
+    fcn_AddLogEntry ("... Home Warranty FA Guest group has "+$FAGuests.count+" members in FA Tenant")
+    fcn_AddLogEntry "... "   
+}
+
+##############################################################################
+# 2.5 Cycle through the list to create new guests
 ##############################################################################
 fcn_AddLogEntry ("... Cycle through the Home Warranty Users")
 fcn_AddLogEntry ("... ")
@@ -982,18 +1028,13 @@ fcn_ProcessUsers $HWUsers $HWTenant $HWauthToken
 fcn_AddLogEntry "... Done checking Guest users from Home Warranty, now look for stale guests accounts"
 
 ##############################################################################
-# 2.5 Perform CRUD activities for HW Guests
+# 2.6 Perform CRUD activities for HW Guests
 ##############################################################################
-[Array]$FAGuests=@()
-fcn_AddLogEntry ("... Get the Home Warranty control group from FA Tenant")
-fcn_GetAzureGroup $FAauthToken  $FAtoHWGuestsGrpGraphURL $FAtoHWGuestsMembersURL $FAListofHWGuests_GrpName $FATenant
-    $IsValid = $Script:results.IsValid
-    $FAGuests = $Script:results.GrpMembers
 If(!($Isvalid)){
-    fcn_AddLogEntry "### Error occurred getting list of Home Warranty FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
+    #fcn_AddLogEntry "### Error occurred getting list of Home Warranty FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
 }
 Else{
-    fcn_AddLogEntry ("... Home Warranty FA Guest group has "+$FAGuests.count+" members")
+    fcn_AddLogEntry ("... Check Home Warranty Users for CRUD Activities")
     fcn_AddLogEntry "... "
     fcn_CheckForStaleUsers $HWUsers $FAGuests $HWauthToken
 }
@@ -1009,18 +1050,17 @@ fcn_AddLogEntry "... "
 # 3.0 Now start on Republic Title Users to create new guests
 #
 ################################################################################################################################
-
-fcn_AddErrorLogEntry "... "
+$Script:NewUsersLog = $LogDate+"RepTitle-NewUsers.txt"
+fcn_AddLogEntry "... "
 fcn_AddErrorLogEntry "... Starting Republic Title"
 fcn_AddLogEntry "---------------------------------------"
-fcn_AddErrorLogEntry "... "
+fcn_AddNewUserLogEntry "... Auth to Republic Title Tenant"
 
 ##############################################################################
 # 3.1 This is where we authenticate and get our access token for Republic title
 ##############################################################################
-fcn_AddLogEntry "... Auth to Republic Title Tenant"
 $Error.clear()
-$Script:LogNewUsers="FAGuests-NewUsers-RP-"+$LogDate+".txt"
+#$Script:LogNewUsers="FAGuests-NewUsers-RP-"+$LogDate+".txt"
 
 $RTBody       = @{grant_type="client_credentials";resource=$resource;client_id=$RTAppID;client_secret=$RTSecret}
 Try{$RTOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$RTTenant/oauth2/token?api-version=1.0 -Body $RTBody}
@@ -1102,17 +1142,17 @@ fcn_AddLogEntry "... ------------------------------"
 # 4.0 Now start on First Canadian Trust to create new guests
 ################################################################################################################################
 #This is where we authenticate and get our access token for Republic Title
-fcn_AddErrorLogEntry "... "
+$Script:NewUsersLog = $LogDate+"FCT-NewUsers.txt"
+fcn_AddLogEntry "... "
 fcn_AddErrorLogEntry "... Starting First Canadian Trust"
 fcn_AddLogEntry "---------------------------------------"
-fcn_AddErrorLogEntry "... "
+fcn_AddNewUserLogEntry "... Auth to First Canadian Trust"
 
 ##############################################################################
 # 4.1 This is where we authenticate and get our access token for Republic title
 ##############################################################################
-fcn_AddLogEntry "... Auth to First Canadian Trust"
 $Error.clear()
-$Script:LogNewUsers="FAGuests-NewUsers-FCT-"+$LogDate+".txt"
+#$Script:LogNewUsers="FAGuests-NewUsers-FCT-"+$LogDate+".txt"
 
 $FCTBody       = @{grant_type="client_credentials";resource=$resource;client_id=$FCTAppID;client_secret=$FCTSecret}
 Try{$FCTOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$FCTTenant/oauth2/token?api-version=1.0 -Body $FCTBody}
