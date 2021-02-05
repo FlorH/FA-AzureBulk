@@ -46,6 +46,7 @@ Date		User        Ver	    Description
 11/15/2019  Flor H.     1.0     Added EagleID for Rep Title
 05/2020     Flor H      1.1     Added FCT
 1/28/2021   Flor H.     1.2     Added logic for Prometic email suffix for FCT
+2/5/2021    Flor H.     1.21    Fixed HW TE & SY Userss who were not getting EA13 set correctly
 #############################################################################################>
 
 #These URLs are used to access Graph and login, they do not change
@@ -278,10 +279,9 @@ Function fcn_UpdateGuestAttributes{
     $Entry = ("... . Use "+$Script:EA13+" as EA13")
     fcn_AddLogEntry $Entry 
     #If($Script:NewUser){out-file -FilePath $Script:LogPath\$Script:LogNewUsers -InputObject "$DateTime  $Entry" -Append}
-    
-    $tmpEmployeeID=$null
+
     If($Script:EIDMatch){
-        $tmpEmployeeID = $tmpGuest.EmployeeID
+        #Found employee ID match, no update required for now
     }
     Else{
         If($null -eq $tmpGuest.EmployeeID){
@@ -289,7 +289,10 @@ Function fcn_UpdateGuestAttributes{
             If (($company -eq "Republic Title") -and ($tmpMail -notlike "*@reuniontitle.com")){
                 out-file -FilePath $Script:LogPath\$Script:HomeTenantLog -InputObject "$DateTime  $Entry" -Append
                 fcn_AddLogEntry ("... . Reunion Title does not have Employee IDs yet")
-                $tmpEmployeeID=$null}
+            }
+            ElseIf(($null -eq $Script:UserHomeDetail.EmployeeId) -and ($Tenant -eq $HWTenant) -and (($SAM -like "TE-*") -or ($SAM -like "SY-*"))){
+                $Entry = ("... % Missing EmployeeID on home tenant $company for TE or SY user ok to continue")
+            }
             Else{
                 $Entry = ("%%% . Missing EmployeeID on home tenant $company for "+$tmpGuest.GivenName+" "+$tmpGuest.SurName+" "+$tmpMail) 
                 fcn_AddErrorLogEntry $Entry 
@@ -568,6 +571,7 @@ Function fcn_CheckFAHWeMail{
     ElseIf($email -like "*@fahw.com"){
         #tenant only users have an @fahw email address.
         fcn_AddLogEntry ("... . user already has fahw email: $email")
+        
         $Script:InviteMail =  $email
     }
     ElseIf($email -like "*@firstam.com"){
@@ -938,7 +942,6 @@ If($Script:TestOnly){
     fcn_AddErrorLogEntry "***"
 }
 
-Return
 ################################################################################################################################
 # 2.0 Process the Home Warranty Users to invite them as Guests
 ################################################################################################################################
@@ -1034,9 +1037,9 @@ If(!($Isvalid)){
     #fcn_AddLogEntry "### Error occurred getting list of Home Warranty FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
 }
 Else{
-    fcn_AddLogEntry ("... Check Home Warranty Users for CRUD Activities")
+    fcn_AddLogEntry ("... Check Home Warranty Users for CRUD Activities - skip for now")
     fcn_AddLogEntry "... "
-    fcn_CheckForStaleUsers $HWUsers $FAGuests $HWauthToken
+    #fcn_CheckForStaleUsers $HWUsers $FAGuests $HWauthToken
 }
 
 fcn_AddErrorLogEntry "... "
@@ -1111,6 +1114,23 @@ fcn_AddErrorLogEntry ("... Republic Title Group has "+$RTUsers.count+" members")
 ##############################################################################
 # 3.4 Cycle through the list to create new guests
 ##############################################################################
+[Array]$FAGuests=@()
+fcn_AddLogEntry ("... Get the Republic Title control group from FA Tenant")
+fcn_GetAzureGroup $FAauthToken  $FAtoRPGuestsGrpGraphURL $FAtoRPGuestsMembersURL $FAListofRPGuests_GrpName $FATenant
+    $IsValid = $Script:results.IsValid
+    $FAGuests = $Script:results.GrpMembers
+
+If(!($Isvalid)){
+    fcn_AddLogEntry "### Error occurred getting list of Republic Title FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
+}
+Else{
+    fcn_AddLogEntry ("... Republic Title FA Guest group has "+$FAGuests.count+" members in FA Tenant")
+    fcn_AddLogEntry "... "   
+}
+
+##############################################################################
+# 3.5 Cycle through the list to create new guests
+##############################################################################
 fcn_AddLogEntry ("... ")
 fcn_AddLogEntry ("... Cycle through the Republic Title Users")
 
@@ -1118,8 +1138,9 @@ fcn_ProcessUsers $RTUsers $RTTenant $RTAuthToken
 fcn_AddLogEntry "... "
 fcn_AddLogEntry "... Done checking users from Republic Title, now look for stale guests"
 
+
 ##############################################################################
-# 3.5 Perform CRUD activities for Republic Title Guests
+# 3.6 Perform CRUD activities for Republic Title Guests
 ##############################################################################
 [Array]$FAGuests=@()
 fcn_AddLogEntry ("... Get the Republic Title Warranty control group from FA Tenant")
@@ -1131,7 +1152,7 @@ If(!($Isvalid)){
 }
 Else{
     fcn_AddLogEntry ("... Republic Title FA Guest group has "+$FAGuests.count+" members")
-    fcn_CheckForStaleUsers $RTUsers $FAGuests $RTAuthToken
+    #fcn_CheckForStaleUsers $RTUsers $FAGuests $RTAuthToken
 }
 
 fcn_AddLogEntry "... ------------------------------"
@@ -1200,9 +1221,28 @@ If(!($Isvalid)){
 }
 
 fcn_AddErrorLogEntry ("... First Canadian Title Group has "+$FCTUsers.count+" members")
+fcn_AddLogEntry ("... ")
 
 ##############################################################################
-# 4.4 Cycle through the list to create new guests
+# 2.4 Get list of HW users already in FA Tenant
+##############################################################################
+
+[Array]$FAGuests=@()
+fcn_AddLogEntry ("... Get the First Canadian Title control group from FA Tenant")
+fcn_GetAzureGroup $FAauthToken  $FAtoFCTGuestsGrpGraphURL $FAtoFCTGuestsMembersURL $FAListofTCTGuests_GrpName $FATenant
+    $IsValid = $Script:results.IsValid
+    $FAGuests = $Script:results.GrpMembers
+
+If(!($Isvalid)){
+    fcn_AddLogEntry "### Error occurred getting list of First Canadian Title FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
+}
+Else{
+    fcn_AddLogEntry ("... First Canadian Title FA Guest group has "+$FAGuests.count+" members in FA Tenant")
+    fcn_AddLogEntry "... "   
+}
+
+##############################################################################
+# 4.5 Cycle through the list to create new guests
 ##############################################################################
 fcn_AddLogEntry ("... ")
 fcn_AddLogEntry ("... Cycle through the First Canadian Title Users")
@@ -1210,6 +1250,25 @@ fcn_AddLogEntry ("... Cycle through the First Canadian Title Users")
 fcn_ProcessUsers $FCTUsers $FCTTenant $FCTAuthToken 
 fcn_AddLogEntry "... "
 fcn_AddLogEntry "... Done checking users from First Canadian Title, now look for stale guests"
+
+##############################################################################
+# 2.6 Perform CRUD activities for HW Guests
+##############################################################################
+If(!($Isvalid)){
+    #fcn_AddLogEntry "### Error occurred getting list of First Canadian Title FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
+}
+Else{
+    fcn_AddLogEntry ("... Check First Canadian Title Users for CRUD Activities")
+    fcn_AddLogEntry "... "
+    fcn_CheckForStaleUsers $HWUsers $FAGuests $HWauthToken
+}
+
+fcn_AddErrorLogEntry "... "
+fcn_AddLogEntry "... ------------------------------"
+fcn_AddErrorLogEntry "... Finished First Canadian Title"
+fcn_AddLogEntry "... ------------------------------"
+fcn_AddLogEntry "... "
+
 
 fcn_AddErrorLogEntry " "
 fcn_AddErrorLogEntry "... script complete"
