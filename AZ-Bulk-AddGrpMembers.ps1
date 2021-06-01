@@ -12,7 +12,7 @@ $GraphUsersBURL      = "https://graph.microsoft.com/Beta/Users"
 
 $Script:FATenant   = "firstam.onmicrosoft.com"                        
 $FAappID    = "7b5fc675-995d-4a96-8572-84e1884f5b8b"           #SP-FAGuestUserInvite - this is the application we are using to call the graph API 
-$FASecret   = "uP/+B7c/q0XdFFzKjGWcxCR6ok9aiLUWjxz2OE24D1c="    #this is the secret associated with the app
+$FASecret   = "8_WL8aEoY-TtkgtYUjCkm1fLP0_-MY_3x7"    #this is the secret associated with the app
 #
 
 $Script:Drive = "C:"
