@@ -31,8 +31,8 @@ ScriptName:		    AZ-Create-Guests
 Author:			    Flor H
 Date Created: 		April 2019
 Reveiwer:			
-Date Released		01/28/2021
-Current Version:	01.20 
+Date Released		06/10/2021
+Current Version:	01.40 
 Usage : 			run the ps1 file
 ***************************************************************************************
 Version History
@@ -48,8 +48,16 @@ Date		User        Ver	    Description
 01/28/2021  Flor H.     1.2     Added logic for Prometic email suffix for FCT
 02/5/2021   Flor H.     1.21    Fixed HW TE & SY Userss who were not getting EA13 set correctly
 05/27/2021  Flor H.     1.3     Added Eagle ID for HW, and allowed FCT users without employee IDs to be added
+6/10/2021   Flor H.     1.4     Added send mail on critical failure
+06/30/2021  Flor H.     1.5     Moved auth to function so they can be called if a token times out
 #############################################################################################>
 $Error.clear()
+#change the drive based on where the script is running
+$Script:Drive = "C:"
+$Script:LogPath="$Script:Drive\PSLogs\Guests"
+if (!(Test-Path "$Script:Drive\PSLogs" )){$null = New-Item -path "$Script:Drive\" -name "PSLogs" -type directory}
+if (!(Test-Path "$Script:Drive\PSLogs\Guests" )){$null = New-Item -path "$Script:Drive\PSLogs" -name "Guests" -type directory}
+
 #These URLs are used to access Graph and login, they do not change
 $loginURL   = "https://login.microsoftonline.com"
 $resource   = "https://graph.microsoft.com"
@@ -78,24 +86,16 @@ $Script:NewUsersOnly=$false
 $FATenant   = "firstam.onmicrosoft.com"                        
 $FAappID    = "7b5fc675-995d-4a96-8572-84e1884f5b8b"           #SP-FAGuestUserInvite - this is the application we are using to call the graph API 
 $FASecret   = "8_WL8aEoY-TtkgtYUjCkm1fLP0_-MY_3x7"    #this is the secret associated with the app
-#This group is used to hold guest home warranty users
-$FAListofHWGuests_GrpOID  ="c300a939-f264-4dbc-a5a0-c5c6292c110e"
-$FAtoHWGuestsGrpGraphURL = $GraphGrpURL+$FAListofHWGuests_GrpOID 
-$FAtoHWGuestsMembersURL= $FAtoHWGuestsGrpGraphURL+"/Members"+$props 
-$FAListofHWGuests_GrpName = "AAD-Guest-FAHWUsers"
-
-#This group is used to hold guest republic title users
-$FAListofRTGuests_GrpOID  ="9333c7f3-2335-42e4-ade8-bdc41060573d"
-$FAListofRTGuests_GrpName = "AAD-Guest-RepTitleUsers"
-$FAtoRTGuestsGrpGraphURL = $GraphGrpURL+$FAListofRTGuests_GrpOID 
-$FAtoRTGuestsMembersURL= $FAtoRTGuestsGrpGraphURL+"/Members"+$props 
 
 #################################################################################################
-#Home Warranty Details do not change
+#This group is used to hold guest home warranty users
+$FAListofHWGuests_GrpOID  ="c300a939-f264-4dbc-a5a0-c5c6292c110e"
+$FAListofHWGuests_GrpName = "AAD-Dyn-Guest-FAHWUsers"
+$FAtoHWGuestsGrpGraphURL = $GraphGrpURL+$FAListofHWGuests_GrpOID 
+$FAtoHWGuestsMembersURL= $FAtoHWGuestsGrpGraphURL+"/Members"+$props 
 $HWTenant      = "fahw.onmicrosoft.com"
 #$HWTenantID    = "2501abe7-66d5-4c8f-994a-b8e7038ed7d6"            
 $HWappID          = "409b4ea8-b0ce-4342-ac31-c5afc83f37e3"          # FirstAm Tenant Sync Service Princple 
-#$HWSecret       = "yj+vUS+WUqjTN0MCH7IUP2QpBbwFczG2NKfFWpgzDlo="   # EXPIRED
 $HWSecret       = "5S_~pAEB5ck.2UozC-~W2g2f4RP-rMP2Y1"              # This is the secret associated with the app
 
 $HWCtrlGrpName     = "Azure-Firstam-Tenant"
@@ -105,34 +105,43 @@ $HWCtrlGrpMembersGraphURL = $HWCtrlGrpGraphURL+"/Members"+$Props
 #$HWCtrlGrpMembersGraphURL = $HWCtrlGrpGraphURL+"/Members"
 
 #################################################################################################
-#Republic Title Details do not change 6/3/2019
+#This group is used to hold guest republic title users
+$FAListofRTGuests_GrpOID  ="9333c7f3-2335-42e4-ade8-bdc41060573d"
+$FAListofRTGuests_GrpName = "AAD-Dyn-Guest-RepTitleUsers"
+$FAtoRTGuestsGrpGraphURL = $GraphGrpURL+$FAListofRTGuests_GrpOID 
+$FAtoRTGuestsMembersURL= $FAtoRTGuestsGrpGraphURL+"/Members"+$props 
 $RTTenant      = "republictitle.onmicrosoft.com"
 #$RTTenantID    = "92a184a7-2c30-40ac-9a52-669c275ca783"            
 $RTappID          = "9851d43e-0c02-44db-91e3-928731a17f85"          # FirstAm Tenant Sync Service Princple 
-$RTSecret       = 'Av0?Vh0p6VISgwR*aIL5]EwU:CE7@FE['     # This is the secret associated with the app
+$RTSecret       = 'YeOf-z59ixz1a0~~4XkOAW3V3Q~NFf-gB.'     # This is the secret associated with the app
 $RTCtrlGrpName     = "SEC-FA-AllEmployees"
 $RTCtrlGrpOID     = "e4e4f1a3-eb53-49de-811c-4f7459ba556b"
 $RTCtrlGrpGraphURL = $GraphGrpURL+$RTCtrlGrpOID 
 $RTCtrlGrpMembersGraphURL = $RTCtrlGrpGraphURL+"/Members"+$Props
 
 #################################################################################################
-#First Canadian Trust 6/30/2020
+#This groups is used to hold guest FCT users
+$FAListofFTCGuests_GrpOID  = "b8c67fcc-e7e3-4d9b-ab67-c408e58bde10"
+$FAListofFCTGuests_GrpName = "AAD-Dyn-Guest-FCTUsers"
+$FAtoFCTGuestsGrpGraphURL = $GraphGrpURL+$FAListofFTCGuests_GrpOID
+$FAtoFCTGuestsMembersURL= $FAtoFCTGuestsGrpGraphURL+"/Members"+$props 
 $FCTTenant      = "fctca.onmicrosoft.com"
-$FCTTenantID    = "3e9292a5-723b-4746-b589-8ee7b282921b"            
+#$FCTTenantID    = "3e9292a5-723b-4746-b589-8ee7b282921b"            
 $FCTAppID          = "f7fb0e8a-347e-42f5-87a5-e7ec8051266e"          # FirstAm Tenant Sync Service Princple 
-$FCTSecret       = '23e5515e-5868-421a-9ff0-ab4949835000'     # This is the secret associated with the app
+$FCTSecret       = "YeOf-z59ixz1a0~~4XkOAW3V3Q~NFf-gB."
 $FCTCtrlGrpName     = "DLG-AAD-PR-FASYNC-DYNC"
 $FCTCtrlGrpOID     = "10a394ed-5546-4021-b63f-a96b957f7f25"
+#First Canadian Trust new secret 6/30/2021
+$FCTSecret       = 'b0t4_fS2xs19BfSE7BC-7-_B2IjSL_S_tn'     # This is the secret associated with the app
+#$FCTCtrlGrpName     = "DLG-GL-Azure-FASYNC"
+#$FCTCtrlGrpOID     = "fb3d5171-ab35-498d-9357-e884d81c3ba3"
 $FCTCtrlGrpGraphURL = $GraphGrpURL+$FCTCtrlGrpOID 
 $FCTCtrlGrpMembersGraphURL = $FCTCtrlGrpGraphURL+"/Members"+$Props
 
 
 #################################################################################################
-## Functions
+## Logging Functions
 #################################################################################################
-$Script:Drive = "C:"
-$Script:LogPath="$Script:Drive\Scripts\PSLogs"
-if (!(Test-Path "$Script:LogPath" )){$null = New-Item -path "$Script:Drive\Scripts" -name "PSLogs" -type directory}
 
 $LogDate = Get-Date -UFormat %m%d%Y
 $Script:LogFile=$LogDate+"-FAGuests.txt"
@@ -143,6 +152,8 @@ $Script:MissingAttribCan = $LogDate+"-FCT-NewUsers.txt"
 $Script:UseCorpEmail=$false 
 $Script:EA13=$null 
 
+$Script:CentralLog="\\corp.firstam.com\restricted\Enterprise Identity Management\Scripts\PSLogs\Guests"
+
 ##################################################
 #  Function update log... tbd
 ##################################################
@@ -151,20 +162,23 @@ function fcn_AddLogEntry {
 	param($Entry)
 	$DateTime = Get-Date -format "yyyy/MM/dd HH:mm"
 	Write-Host "$DateTime  $Entry"
-	out-file -FilePath $Script:LogPath\$Script:LogFile -InputObject "$DateTime  $Entry" -Append	
+	out-file -FilePath $Script:LogPath\$Script:LogFile -InputObject "$DateTime  $Entry" -Append
+    If(Test-Path $Script:CentralLog){out-file -FilePath $Script:CentralLog\$Script:LogFile -InputObject "$DateTime  $Entry" -Append}
+
 }
 
 function fcn_AddErrorLogEntry {
 	param($Entry)
 	$DateTime = Get-Date -format "yyyy/MM/dd HH:mm"
     out-file -FilePath $Script:LogPath\$Script:ErrorFile -InputObject "$DateTime  $Entry" -Append	
+    If(Test-Path $Script:CentralLog){out-file -FilePath $Script:CentralLog\$Script:ErrorFile -InputObject "$DateTime  $Entry" -Append}
     fcn_AddLogEntry $Entry 
 }
 
 function fcn_AddTenantUserLogEntry {
 	param($Entry)
 	$DateTime = Get-Date -format "yyyy/MM/dd HH:mm"
-    out-file -FilePath "$Script:LogPath\$Script:HomeTenantLog" -InputObject "$DateTime  $Entry" -Append
+    out-file -FilePath $Script:LogPath\$Script:HomeTenantLog -InputObject "$DateTime  $Entry" -Append
     fcn_AddLogEntry $Entry 
 }
 
@@ -182,9 +196,114 @@ Function fcn_ErrorHandling{
 
 }
 
-##############################################################################
+Function fcn_SendMessage{
+
+    $where = $env:COMPUTERNAME
+    $SentFrom = "prod-sa-eim-rprt3@firstam.com"
+    $SendToMail = @("flherrera@firstam.com")
+    $Subject =  "Guest Invite Script Error on $Where"
+    $Body = "Hello 
+            <p> There has been a critical erron on the Guest Invite script running on $Where please review the logs</p>
+
+    " 
+    
+    Send-MailMessage -From $SentFrom -Subject $subject -To $SendToMail -Body $body -SmtpServer mail.firstam.com -BodyAsHtml -Attachments $Script:LogPath\$Script:ErrorFile
+    }
+
+##################################################################################################
+##################################################################################################
+#
+#  Functions to get auth token
+#
+##################################################################################################
+##################################################################################################
+
+Function fcn_AuthFA{
+    #Authenticate to FA Destination location again so we don't time out
+    fcn_AddLogEntry "... Auth to FA Tenant third time"
+    $Error.clear()
+    $FAbody       = @{grant_type="client_credentials";resource=$resource;client_id=$FAappID;client_secret=$FASecret}
+    Try{$FAOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$FATenant/oauth2/token?api-version=1.0 -Body $FAbody}
+    Catch{
+        fcn_AddErrorLogEntry "### Auth for FA failed.. stopping ###"
+        fcn_AddErrorLogEntry ("### # "+$Error.Exception+" ")
+        fcn_AddErrorLogEntry "### "
+        fcn_AddErrorLogEntry "### Failure need updated FA Credentials ###"
+        fcn_SendMessage
+        Return 
+    }
+    if ($null -ne $FAOauth.access_token){
+        $FAauthToken = @{'Authorization'="$($FAOauth.token_type) $($FAOauth.access_token)"}
+    }
+}
+
+Function fcn_AuthFAHW{
+    $Script:HomeTenantLog = $Script:MissingAttribFAHW
+
+    $HWBody       = @{grant_type="client_credentials";resource=$resource;client_id=$HWappID;client_secret=$HWSecret}
+    Try{$HWOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$HWTenant/oauth2/token?api-version=1.0 -Body $HWBody}
+    Catch{
+        fcn_AddErrorLogEntry "##################################################"
+        fcn_AddErrorLogEntry "### Auth for Home Warranty failed.. stopping ###"
+        fcn_AddErrorLogEntry ("### # "+$Error.Exception+" ")
+        fcn_AddErrorLogEntry "### "
+        fcn_AddErrorLogEntry "### Expired Secret need updated Home Warranty Credentials ###"
+        fcn_AddErrorLogEntry "##################################################"
+        fcn_SendMessage
+        $AuthOK=$false
+    }
+    if ($null -ne $HWOauth.access_token){
+        $HWauthToken = @{'Authorization'="$($HWOauth.token_type) $($HWOauth.access_token)"}
+        $AuthOK=$true
+    }
+}
+
+Function fcn_AuthRT{
+    $Script:HomeTenantLog = $Script:MissingAttribRT
+    $RTBody       = @{grant_type="client_credentials";resource=$resource;client_id=$RTAppID;client_secret=$RTSecret}
+    Try{$RTOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$RTTenant/oauth2/token?api-version=1.0 -Body $RTBody}
+    Catch{
+        fcn_AddLogEntry " "
+        fcn_AddErrorLogEntry "##############################################################"
+        fcn_AddErrorLogEntry "### Auth for Repulic Title failed.. STOPPING"
+        fcn_AddErrorLogEntry ("### # "+$Error.Exception+" ")
+        fcn_AddErrorLogEntry "### "
+        fcn_AddErrorLogEntry "### Expired Secret need updated Republic Title Credentials ###"
+        fcn_AddErrorLogEntry "##############################################################"
+        fcn_SendMessage
+        $AuthOK=$false
+    }
+    if ($null -ne $RTOauth.access_token){
+        $RTAuthToken = @{'Authorization'="$($RTOauth.token_type) $($RTOauth.access_token)"}
+        $AuthOK=$true
+    }
+}
+
+Function fcn_AuthFCT{
+    $Script:HomeTenantLog = $Script:MissingAttribCan
+    $FCTBody       = @{grant_type="client_credentials";resource=$resource;client_id=$FCTAppID;client_secret=$FCTSecret}
+    Try{$FCTOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$FCTTenant/oauth2/token?api-version=1.0 -Body $FCTBody}
+    Catch{
+        fcn_AddErrorLogEntry "########################################################"
+        fcn_AddErrorLogEntry "### Auth for First Canadian Trust failed.. stopping ###"
+        fcn_AddErrorLogEntry ("### # "+$Error.Exception+" ")    
+        fcn_AddErrorLogEntry "### "
+        fcn_AddErrorLogEntry "### Failure need updated FCT Secret ###"
+        fcn_AddErrorLogEntry "### Expired Secret need updated FCT Credentials      ###"
+        fcn_AddErrorLogEntry "########################################################"
+        fcn_SendMessage
+        $AuthOK=$false 
+    }
+    if ($null -ne $FCTOauth.access_token){
+        $FCTAuthToken = @{'Authorization'="$($FCTOauth.token_type) $($FCTOauth.access_token)"}
+        $AuthOK=$true 
+    }
+}
+
+
+##################################################################################################
 #  Function to read the Azure group and return members
-##############################################################################
+##################################################################################################
 Function fcn_GetAzureGroup{
     Param($tmpAuthToken, $tmpGrpURL, $tmpGrpMembURL, $tmpCtrlGrpName, $tmpTenant)
 
@@ -197,6 +316,7 @@ Function fcn_GetAzureGroup{
     Catch{
         fcn_AddErrorLogEntry "### Unable to find Group $tmpCtrlGrpName on $tmpTenant.... stopping ###"
             [Hashtable]$Script:results = @{IsValid=$false}
+            fcn_SendMessage
         Return}
 
     #Now get the members of the group we will use to see if they need an account created on the destination tenant
@@ -209,6 +329,7 @@ Function fcn_GetAzureGroup{
         fcn_ErrorHandling $error 
         fcn_AddErrorLogEntry "### Unable to retrieve group members for $tmpCtrlGrpName on $tmpTenant ... Stopping ###"
         [Hashtable]$Script:results = @{IsValid=$false}
+        fcn_SendMessage
         Return
     }
 
@@ -260,6 +381,7 @@ Function fcn_GetGrpMembership{
         #throw error.. in testing no error was given, returned no data instead if we get an error something else is going on
         fcn_AddErrorLogEntry "... # Unknown error retrieving group membership, skipping rename"
         [Hashtable]$Script:results = @{IsValid=$false; FAGrps=$null} 
+        fcn_SendMessage
         Return}
 
     fcn_AddLogEntry ("... . User is a member of "+$FAGrpDetail.count+" groups")
@@ -286,17 +408,16 @@ Function fcn_UpdateGuestAttributes{
 
     fcn_AddLogEntry ("... .. Azure User ObjectID: "+$NewUserOID) 
 
-    # Make sure Eagle ID is set
-    IF($null -eq $Script:EagleID){
-        If($company -eq "Republic Title"){
-            fcn_AddLogEntry ("... .. Use EgleID from home tenant: "+$tmpGuest.onPremisesExtensionAttributes.extensionAttribute10)
-            $Script:EagleID  = $tmpGuest.onPremisesExtensionAttributes.extensionAttribute10
-        }
-        ElseIf($Company -eq "FAHW"){
-            fcn_AddLogEntry ("... .. Use EgleID from home tenant: "+$tmpGuest.onPremisesExtensionAttributes.extensionAttribute12)
-            $Script:EagleID = $tmpGuest.onPremisesExtensionAttributes.extensionAttribute12
-        }
-    }
+    #IF($null -eq $Script:EagleID){
+    #    If($company -eq "Republic Title"){
+    #       fcn_AddLogEntry ("... .. Use EgleID from home tenant: "+$tmpGuest.onPremisesExtensionAttributes.extensionAttribute10)
+    #        $Script:EagleID  = $tmpGuest.onPremisesExtensionAttributes.extensionAttribute10
+    #    }
+    #    ElseIf($Company -eq "FAHW"){
+    #        fcn_AddLogEntry ("... .. Use EgleID from home tenant: "+$tmpGuest.onPremisesExtensionAttributes.extensionAttribute12)
+    #        $Script:EagleID = $tmpGuest.onPremisesExtensionAttributes.extensionAttribute12
+    #    }
+    #}
 
     # EA13 is SSO email address
     #$Entry = ("... .. Use as EA13 "+$Script:EA13)
@@ -470,7 +591,7 @@ Function fcn_AddGuestToFA{
         If($UserDetail.count -eq 0){
             fcn_AddLogEntry ("### # User not created correctly")
             Write-host $JsonInvite -ForegroundColor Yellow 
-            Start-sleep 5
+            Start-sleep 2
             Return 
             #validate user was created                
         }
@@ -539,7 +660,8 @@ Function fcn_SetMailToUPN{
     }
     Catch {
         #throw error.. in testing no error was given, returned no data instead if we get an error something else is going on
-        fcn_AddErrorLogEntry "... unknown error in get by email filter"
+        fcn_AddErrorLogEntry ("... fcn_SetMailtoUPN unknown error in get by email filter for "+$Script:InviteMail)
+        fcn_AddTenantUserLogEntry ("... fcn_SetMailtoUPN unknown error in get by email filter for "+$Script:InviteMail)
         $cntSkip++
         Return 
     }
@@ -648,7 +770,7 @@ Function fcn_ProcessUsers{
     #CRUD Counts
     $cntC=0; $cntMissMatch=0; $cntU=0; $cntD=0; $cntSkip=0; $cntFound=0; $cntError=0;
     ForEach($Guest in $GuestList){
-        Start-Sleep 5
+        #Start-Sleep 5
         WRite-Host ""
         fcn_AddLogEntry ("... ")
         fcn_AddLogEntry ("... Checking "+$Guest.DisplayName+" - "+$Guest.Mail+" in "+$Tenant)
@@ -669,7 +791,7 @@ Function fcn_ProcessUsers{
         $UserURL = $GraphBetaUsersURL+$Guest.ID
                     
         #Skip if not found in home tenant or have other issue
-        fcn_AddLogEntry ("... . Get full details from home tenant")
+        fcn_AddLogEntry ("... .. Get full details from home tenant")
         Try{$Script:tmpUser = (Invoke-WebRequest -UseBasicParsing -Headers $tmpAuthToken -Uri $UserURL -Method GET)
             $script:UserHomeDetail = (ConvertFrom-Json -InputObject $Script:tmpUser.Content)
         }
@@ -677,23 +799,28 @@ Function fcn_ProcessUsers{
             fcn_AddLogEntry ("... . not found in home tenant")
             Continue}
 
-        #$Script:EA13=$null; $UsingUPN=$false 
+        $Script:EagleID=$null
         $SAM = $Script:UserHomeDetail.onPremisesSamAccountName
-        fcn_AddLogEntry ("... Found "+$Script:UserHomeDetail.DisplayName+" in "+$Tenant)
-        fcn_AddLogEntry ("... . Assigned email in home tenant:  $email")
-        fcn_AddLogEntry ("... . on Premise SamAccountName:      $SAM")
-        fcn_AddLogEntry ("... . Cloud UPN is                    "+$Script:UserHomeDetail.userPrincipalName)
-        fcn_AddLogEntry ("... . employee ID:                    "+$Script:UserHomeDetail.EmployeeID)
-        fcn_AddLogEntry ("... . Home EA13:                      "+$Script:UserHomeDetail.OnPremisesExtensionAttributes.extensionAttribute13)
-        If($Tenant -eq $FCTTenant){
-            fcn_AddLogEntry ("... . Eagle ID Rep Title:             "+$Script:UserHomeDetail.OnPremisesExtensionAttributes.extensionAttribute10)
+        fcn_AddLogEntry ("... . Found "+$Script:UserHomeDetail.DisplayName+" in "+$Tenant)
+        fcn_AddLogEntry ("... .. Assigned email in home tenant:  $email")
+        fcn_AddLogEntry ("... .. on Premise SamAccountName:      $SAM")
+        fcn_AddLogEntry ("... .. Cloud UPN is                    "+$Script:UserHomeDetail.userPrincipalName)
+        fcn_AddLogEntry ("... .. Employee ID:                    "+$Script:UserHomeDetail.EmployeeID)
+        fcn_AddLogEntry ("... .. Primary email (EA13):           "+$Script:UserHomeDetail.OnPremisesExtensionAttributes.extensionAttribute13)
+        If($Tenant -eq $RTTenant){
+            fcn_AddLogEntry ("... .. Eagle ID Rep Title:             "+$Script:UserHomeDetail.OnPremisesExtensionAttributes.extensionAttribute10)
+            $Script:EagleID = $Script:UserHomeDetail.OnPremisesExtensionAttributes.extensionAttribute10
         }
         ElseIf($Tenant -eq $HWTenant){
-            fcn_AddLogEntry ("... . Eagle ID FAHW:                  "+$Script:UserHomeDetail.OnPremisesExtensionAttributes.extensionAttribute12)
+            fcn_AddLogEntry ("... .. Eagle ID FAHW:                  "+$Script:UserHomeDetail.OnPremisesExtensionAttributes.extensionAttribute12)
+            $Script:EagleID = $Script:UserHomeDetail.OnPremisesExtensionAttributes.extensionAttribute12
         }
-        fcn_AddLogEntry ("... ")
-          
-            
+        Else{
+            fcn_AddLogEntry ("... .. Eagle ID FCT:                    Not in use")
+            $Script:EagleID=$null}
+        
+        fcn_AddLogEntry ("... .. figure out invite email")
+                      
         #Figure out what to use as the invite email
         $Script:AdditionalProxy=$false
         If($Tenant -eq $RTTenant){
@@ -726,7 +853,7 @@ Function fcn_ProcessUsers{
                 $FALookupEmail = $Script:UserHomeDetail.userPrincipalName
                 $Script:InviteMail = $Script:UserHomeDetail.userPrincipalName
                 $Company="FCT"
-                $Script:EagleID=$null
+                #$Script:EagleID=$null
             }
             Else{
                 fcn_AddErrorLogEntry ("%%% . First Canadian Title - expecting @fct.ca suffix on email " + $email+" invalid email suffix Skipping user %%%")
@@ -739,7 +866,7 @@ Function fcn_ProcessUsers{
             $cntSkip++; Continue
         }
          
-        fcn_AddLogEntry ("... . Invite email "+$Script:InviteMail)
+        fcn_AddLogEntry ("... .. Invite email will be: "+$Script:InviteMail)
 
         #Set variables to lookup guest user on FA tenant to see if they already exist or if email is already in use
         $lookupBetaURL = $null; $Lookup=$null; $FALookupDetail=$null 
@@ -753,7 +880,8 @@ Function fcn_ProcessUsers{
         }
         Catch {
             #throw error.. in testing no error was given, returned no data instead if we get an error something else is going on
-            fcn_AddErrorLogEntry "... unknown error in get by email filter"
+            fcn_AddErrorLogEntry ("... Lookup Guest in FA - unknown error in get by email filter with FA eMail"+$FALookupEmail)
+            fcn_AddTenantUserLogEntry ("... Lookup Guest in FA - unknown error in get by email filter with FA eMail"+$FALookupEmail)
             $cntSkip++
             Continue
         }
@@ -792,7 +920,7 @@ Function fcn_ProcessUsers{
                 }
             }       #employee ID does not match
             Else{
-                If($null -eq $Guest.EmployeeID){"... % Missing Employee IDs from home tenant"
+                If($null -eq $Guest.EmployeeID){fcn_AddLogEntry "... % Missing Employee IDs from home tenant"
                     $Script:EIDMatch = $false}
                 Else{fcn_AddLogEntry "... . employee IDs match, same user check EA12 and EA13"
                     $Script:EIDMatch = $true}
@@ -890,22 +1018,60 @@ Function fcn_ProcessUsers{
             fcn_AddLogEntry ("... . Next check FA Tenant to see if there is an employeeID match")
                 
             #check here to see if we find match on EmployeeID, if we do then user was renamed employeeIDs are not reused.
-            If(($null -eq $Script:UserHomeDetail.EmployeeId) -and ($Tenant -eq $HWTenant) -and (($SAM -like "TE-*") -or ($SAM -like "SY-*"))){
-                #If home warranty and TE or SY users, no employee IDs only check using email.
-                fcn_AddLogEntry ("... . no match via email skipping employeeID check for HW for TE and SY")
-                fcn_AddGuestToFA $Script:UserHomeDetail $email $company 
-                    $IsValid = $Script:results.IsValid
-                    If($IsValid){$cntC++}Else{$cntError++}
+            If(($null -eq $Script:UserHomeDetail.EmployeeId) -and ($Tenant -eq $HWTenant)){
+                If(($SAM -like "TE-*") -or ($SAM -like "SY-*")){
+                    #If home warranty and TE or SY users, no employee IDs only check using email.
+                    fcn_AddLogEntry ("... . no match via email skipping employeeID check for HW for TE and SY")
+                    fcn_AddGuestToFA $Script:UserHomeDetail $email $company 
+                        $IsValid = $Script:results.IsValid
+                        If($IsValid){$cntC++}Else{$cntError++}
+                }
+                Else{
+                    #lookup using eagle ID
+                    fcn_AddTenantUserLogEntry ("%%% FAHW User "+$email+" has no employeeID")
+                    $EgleIDfilter = "`$filter=extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute12 eq `'$Script:EagleID'"
+                    $lookupBetaURL = $GraphBetaUsersURL+'?'+$EgleIDfilter
+                    Try{$Lookup = Invoke-WebRequest -UseBasicParsing -Headers $FAauthToken -Uri $lookupBetaURL -Method GET
+                        [Array]$FALookupDetail = (ConvertFrom-Json -InputObject $Lookup.Content).value}
+                    Catch{
+                        fcn_AddErrorLogEntry ("### unknown error in get by EagleID for Republic Title - Skipping User")
+                        $cntSkip++
+                        Continue
+                    }
+                }
             }
             ElseIf(($null -eq $Script:UserHomeDetail.EmployeeId) -and ($Tenant -eq $FCTTenant)){
                 #If home warranty and TE or SY users, no employee IDs only check using email.
-                fcn_AddLogEntry ("... . no match via email ... do we need to start using Employee Number?")
-                fcn_AddGuestToFA $Script:UserHomeDetail $email $company 
-                    $IsValid = $Script:results.IsValid
-                    If($IsValid){$cntC++}Else{$cntError++}
-            }             
-            ElseIf($FAGuests.EmployeeID -contains $Script:UserHomeDetail.EmployeeId){                
+                fcn_AddErrorLogEntry ("### FCT User "+$email+" has no employeeID")
+                fcn_AddTenantUserLogEntry ("### FCT User "+$email+" has no employeeID")
+                fcn_AddErrorLogEntry ("### Skipping User")
+                    $cntSkip++
+                    Continue
+                #fcn_AddGuestToFA $Script:UserHomeDetail $email $company 
+                #    $IsValid = $Script:results.IsValid
+                #    If($IsValid){$cntC++}Else{$cntError++}
+            }
+            ElseIf(($null -eq $Script:UserHomeDetail.EmployeeId) -and ($Tenant -eq $RTTenant)){
+                #missing employeeID check using EagleID
+                fcn_AddTenantUserLogEntry ("%%% Republic Title User "+$email+" has no employeeID")
+                fcn_AddTenantUserLogEntry ("%%% Skipping User")
+                #$EgleIDfilter = "`$filter=extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute12 eq `'$Script:EagleID'"
+                #$lookupBetaURL = $GraphBetaUsersURL+'?'+$EgleIDfilter
+                #Try{$Lookup = Invoke-WebRequest -UseBasicParsing -Headers $FAauthToken -Uri $lookupBetaURL -Method GET
+                #    [Array]$FALookupDetail = (ConvertFrom-Json -InputObject $Lookup.Content).value}
+                #Catch{
+                #    fcn_AddErrorLogEntry ("### unknown error in get by EagleID for Republic Title - Skipping User")
+                #    $cntSkip++
+                #    Continue
+                }
+            }           
+            ElseIf($FAGuests.EmployeeID -contains $Script:UserHomeDetail.EmployeeId){ 
+                $tmpUser = $FAGuests | Where-Object {$_.EmployeeID -eq $Script:UserHomeDetail.EmployeeId}
                 fcn_AddLogEntry ("... . eMail did not match but employee IDs did, lookup using employeeID")
+                fcn_AddLogEntry ("... .. Home Tenant: "+ $Script:UserHomeDetail.EmployeeId)
+                fcn_AddLogEntry ("... .. FA Tenant:   "+ $tmpUser.EmployeeId)
+                fcn_AddLogEntry ("... .. FA Tenant mail:   "+ $tmpUser.mail)
+                $FALookupDetail=$null; $lookup=$null 
                 $EID = $Script:UserHomeDetail.EmployeeId
                 $EIDfilter = "`$filter=employeeID eq `'$EID'"
                 $lookupBetaURL = $GraphBetaUsersURL+'?'+$EIDfilter
@@ -937,7 +1103,7 @@ Function fcn_ProcessUsers{
 
                 fcn_AddGuestToFA $Guest $email $company
                 $Isvalid = $Script:results.IsValid
-                $rc = [Array]$Groups = $Script:results.RC 
+                #$rc = [Array]$Groups = $Script:results.RC 
                 If(!($Isvalid)){
                 #Create user failed, throw error code and continue
                     Continue}
@@ -988,6 +1154,44 @@ Function fcn_CheckForStaleUsers{
     Param($Users, $FAGuests, $tmpAuthToken)
 
     ForEach($faguest in $FAGuests){
+
+        $UserURL = $GraphBetaUsersURL+$faguest.ID
+        $ValUser = (Invoke-WebRequest -UseBasicParsing -Headers $FAauthToken -Uri $UserURL -Method GET)
+        $UserDetail = ConvertFrom-Json -InputObject $ValUser.Content
+
+        $tmpEA13 = $UserDetail.extension_4d5db290c1824986815f308e8a5a1f09_extensionAttribute13
+        $found=$null
+        $Found = $Users | where-object {$_.mail -eq $tmpEA13}
+        If($null -eq $Found){
+            #stale user delete    
+            fcn_AddLogEntry ("... . "+$UserDetail.displayname+" not found in home tenant using email of $tmpEA13")
+            $EIDFound=$null
+            $EIDFound = $Users | where-object {$_.employeeId -eq $UserDetail.employeeId}
+            If($null -eq $EIDFound){
+                fcn_AddLogEntry ("... .. No match found using employeeID of "+$UserDetail.employeeId+" stale user remove from FA Tenant")
+            }
+            Else{
+                fcn_AddLogEntry ("... .. Found Employee ID match: "+$UserDetail.employeeId+" must be a rename")
+            }
+        }
+        Else{
+            #Found email address check employee ID or EagleID
+            
+            If($UserDetail.employeeId -eq $Found.employeeid){
+                #Write-host ("Same user employeeIDs match "+$Found.employee)
+            }
+            Else{
+                #either user doesn't have employeeID or account name was reused
+                fcn_AddLogEntry ("... % Found "+$UserDetail.displayname+" with email of $tmpEA13 but Employee IDs do not match")
+                fcn_AddLogEntry ("... .. FA Employee ID:  "+$UserDetail.employeeId)
+                fcn_AddLogEntry ("... .. $Tenant Employee ID: "+$Found.employeeId)
+            
+            }
+        
+        }
+
+
+
         If($Users.mail -contains $faGuest.Mail){
             #fcn_AddLogEntry ("... Verified as active User: "+$faGuest.Mail)
         }
@@ -1025,6 +1229,7 @@ If($Script:TestOnly){
 ################################################################################################################################
 
 fcn_AddLogEntry "..."
+fcn_AddLogEntry "... ------------------------------"
 fcn_AddErrorLogEntry "... Starting Home Warranty"
 fcn_AddLogEntry "... ------------------------------"
 fcn_AddTenantUserLogEntry "... Auth to Home Warranty Tenant"
@@ -1038,12 +1243,18 @@ $Script:HomeTenantLog = $Script:MissingAttribFAHW
 $HWBody       = @{grant_type="client_credentials";resource=$resource;client_id=$HWappID;client_secret=$HWSecret}
 Try{$HWOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$HWTenant/oauth2/token?api-version=1.0 -Body $HWBody}
 Catch{
+    fcn_AddErrorLogEntry "##################################################"
     fcn_AddErrorLogEntry "### Auth for Home Warranty failed.. stopping ###"
     fcn_AddErrorLogEntry ("### # "+$Error.Exception+" ")
-    Return 
+    fcn_AddErrorLogEntry "### "
+    fcn_AddErrorLogEntry "### Expired Secret need updated Home Warranty Credentials ###"
+    fcn_AddErrorLogEntry "##################################################"
+    fcn_SendMessage
+    $AuthOK=$false
 }
 if ($null -ne $HWOauth.access_token){
     $HWauthToken = @{'Authorization'="$($HWOauth.token_type) $($HWOauth.access_token)"}
+    $AuthOK=$true
 }
 
 ##############################################################################
@@ -1054,9 +1265,12 @@ $Error.clear()
 $FAbody       = @{grant_type="client_credentials";resource=$resource;client_id=$FAappID;client_secret=$FASecret}
 Try{$FAOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$FATenant/oauth2/token?api-version=1.0 -Body $FAbody}
 Catch{
+    fcn_AddErrorLogEntry "##################################################"
     fcn_AddErrorLogEntry "### Auth for FA failed.. stopping ###"
     fcn_AddErrorLogEntry ("### # "+$Error.Exception+" ")
-    Return 
+    fcn_AddErrorLogEntry "### "
+    fcn_AddErrorLogEntry "### Failure need updated FA Credentials ###"
+    fcn_AddErrorLogEntry "##################################################"
 }
 if ($null -ne $FAOauth.access_token){
     $FAauthToken = @{'Authorization'="$($FAOauth.token_type) $($FAOauth.access_token)"}
@@ -1065,67 +1279,71 @@ if ($null -ne $FAOauth.access_token){
 ##############################################################################
 # 2.3 Get the members of the Home Warranty control group
 ##############################################################################
-$Entry = ("... get the Home Warranty Control Group $HWCtrlGrpName from Home Warranty Tenant")
-fcn_AddLogEntry $Entry
-#out-file -FilePath $Script:LogPath\$Script:MissingAttribFAHW -InputObject "$DateTime  $Entry" -Append
+If($AuthOK){
+    $Entry = ("... get the Home Warranty Control Group $HWCtrlGrpName from Home Warranty Tenant")
+    fcn_AddLogEntry $Entry
+    
+    #Call function which gets group and returns members
+    fcn_GetAzureGroup $HWauthToken  $HWCtrlGrpGraphURL $HWCtrlGrpMembersGraphURL $HWCtrlGrpName $HWTenant
+        $IsValid = $Script:results.IsValid
+        $HWUsers = $Script:results.GrpMembers
+    If(!($Isvalid)){
+        fcn_AddErrorLogEntry "### Error occurred getting list from FAHW of accounts to create as Guests on FA tenant ... Skipping Home Warranty ###"
+        $CritError++
+        fcn_SendMessage
+        Return
+    }
+    fcn_AddErrorLogEntry ("... Home Warranty Group has "+$HWUsers.count+" members")
+    fcn_AddLogEntry ("... ")
 
-#Call function which gets group and returns members
-fcn_GetAzureGroup $HWauthToken  $HWCtrlGrpGraphURL $HWCtrlGrpMembersGraphURL $HWCtrlGrpName $HWTenant
-    $IsValid = $Script:results.IsValid
-    $HWUsers = $Script:results.GrpMembers
-If(!($Isvalid)){
-    fcn_AddErrorLogEntry "### Error occurred getting list from FAHW of accounts to create as Guests on FA tenant ... Skipping Home Warranty ###"
-    $CritError++
-    Return
-}
-fcn_AddErrorLogEntry ("... Home Warranty Group has "+$HWUsers.count+" members")
-fcn_AddLogEntry ("... ")
+    ##############################################################################
+    # 2.4 Get list of HW users already in FA Tenant
+    ##############################################################################
 
+    [Array]$FAGuests=@()
+    fcn_AddLogEntry ("... Get the Home Warranty control group from FA Tenant")
+    fcn_GetAzureGroup $FAauthToken  $FAtoHWGuestsGrpGraphURL $FAtoHWGuestsMembersURL $FAListofHWGuests_GrpName $FATenant
+        $IsValid = $Script:results.IsValid
+        $FAGuests = $Script:results.GrpMembers
 
-##############################################################################
-# 2.4 Get list of HW users already in FA Tenant
-##############################################################################
+    If(!($Isvalid)){
+        fcn_AddLogEntry "### Error occurred getting list of Home Warranty FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
+    }
+    Else{
+        fcn_AddLogEntry ("... Home Warranty FA Guest group has "+$FAGuests.count+" members in FA Tenant")
+        fcn_AddLogEntry "... "           
+    }
 
-[Array]$FAGuests=@()
-fcn_AddLogEntry ("... Get the Home Warranty control group from FA Tenant")
-fcn_GetAzureGroup $FAauthToken  $FAtoHWGuestsGrpGraphURL $FAtoHWGuestsMembersURL $FAListofHWGuests_GrpName $FATenant
-    $IsValid = $Script:results.IsValid
-    $FAGuests = $Script:results.GrpMembers
+    ##############################################################################
+    # 2.5 Cycle through the list to create new guests
+    ##############################################################################
+    fcn_AddLogEntry ("... Cycle through the Home Warranty Users")
+    fcn_AddLogEntry ("... ")
+    fcn_ProcessUsers $HWUsers $HWTenant $HWauthToken
 
-If(!($Isvalid)){
-    fcn_AddLogEntry "### Error occurred getting list of Home Warranty FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
-}
-Else{
-    fcn_AddLogEntry ("... Home Warranty FA Guest group has "+$FAGuests.count+" members in FA Tenant")
-    fcn_AddLogEntry "... "   
-}
+    fcn_AddLogEntry "... Done checking Guest users from Home Warranty, now look for stale guests accounts"
 
-##############################################################################
-# 2.5 Cycle through the list to create new guests
-##############################################################################
-fcn_AddLogEntry ("... Cycle through the Home Warranty Users")
-fcn_AddLogEntry ("... ")
-fcn_ProcessUsers $HWUsers $HWTenant $HWauthToken
+    ##############################################################################
+    # 2.6 Perform CRUD activities for HW Guests
+    ##############################################################################
+    If(!($Isvalid)){
+        #fcn_AddLogEntry "### Error occurred getting list of Home Warranty FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
+    }
+    Else{
+        fcn_AddLogEntry ("... Check Home Warranty Users for CRUD Activities - skip for now")
+        fcn_AddLogEntry "... "
+        #fcn_CheckForStaleUsers $HWUsers $FAGuests $HWauthToken
+    }
 
-fcn_AddLogEntry "... Done checking Guest users from Home Warranty, now look for stale guests accounts"
-
-##############################################################################
-# 2.6 Perform CRUD activities for HW Guests
-##############################################################################
-If(!($Isvalid)){
-    #fcn_AddLogEntry "### Error occurred getting list of Home Warranty FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
-}
-Else{
-    fcn_AddLogEntry ("... Check Home Warranty Users for CRUD Activities - skip for now")
+    fcn_AddErrorLogEntry "... "
+    fcn_AddLogEntry "... ------------------------------"
+    fcn_AddErrorLogEntry "... Finished Home Warranty"
+    fcn_AddLogEntry "... ------------------------------"
     fcn_AddLogEntry "... "
-    #fcn_CheckForStaleUsers $HWUsers $FAGuests $HWauthToken
 }
-
-fcn_AddErrorLogEntry "... "
-fcn_AddLogEntry "... ------------------------------"
-fcn_AddErrorLogEntry "... Finished Home Warranty"
-fcn_AddLogEntry "... ------------------------------"
-fcn_AddLogEntry "... "
+Else{
+    fcn_AddErrorLogEntry "### Skipped Processing Home Warranty"    
+}
 
 ################################################################################################################################
 #
@@ -1134,6 +1352,7 @@ fcn_AddLogEntry "... "
 ################################################################################################################################
 
 fcn_AddLogEntry "... "
+fcn_AddLogEntry "---------------------------------------"
 fcn_AddErrorLogEntry "... Starting Republic Title"
 fcn_AddLogEntry "---------------------------------------"
 fcn_AddTenantUserLogEntry "... Auth to Republic Title Tenant"
@@ -1147,12 +1366,20 @@ $Error.clear()
 $RTBody       = @{grant_type="client_credentials";resource=$resource;client_id=$RTAppID;client_secret=$RTSecret}
 Try{$RTOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$RTTenant/oauth2/token?api-version=1.0 -Body $RTBody}
 Catch{
-    fcn_AddErrorLogEntry "### Auth for Repulic Title failed.. stopping ###"
+    fcn_AddLogEntry " "
+    fcn_AddErrorLogEntry "##############################################################"
+    fcn_AddErrorLogEntry "### Auth for Repulic Title failed.. STOPPING"
     fcn_AddErrorLogEntry ("### # "+$Error.Exception+" ")
-    Return 
+    fcn_AddErrorLogEntry "### "
+    fcn_AddErrorLogEntry "### Expired Secret need updated Republic Title Credentials ###"
+    fcn_AddErrorLogEntry "##############################################################"
+    fcn_SendMessage
+    $AuthOK=$false
+    #Return 
 }
 if ($null -ne $RTOauth.access_token){
     $RTAuthToken = @{'Authorization'="$($RTOauth.token_type) $($RTOauth.access_token)"}
+    $AuthOK=$true
 }
 
 ##############################################################################
@@ -1166,6 +1393,9 @@ Try{$FAOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$FATenant/oaut
 Catch{
     fcn_AddErrorLogEntry "### Auth for FA failed.. stopping ###"
     fcn_AddErrorLogEntry ("### # "+$Error.Exception+" ")
+    fcn_AddErrorLogEntry "### "
+    fcn_AddErrorLogEntry "### Failure need updated FA Credentials ###"
+    fcn_SendMessage
     Return 
 }
 if ($null -ne $FAOauth.access_token){
@@ -1175,68 +1405,74 @@ if ($null -ne $FAOauth.access_token){
 ##############################################################################
 # 3.3 Get the members of the Republic Title control group
 ##############################################################################
-$Entry = ("... get the Republic Title Control Group $RTCtrlGrpName from the Republic Title Tenant")
-fcn_AddLogEntry $Entry
-#out-file -FilePath $Script:LogPath\$Script:MissingAttribRT -InputObject "$DateTime  $Entry" -Append
+If($AuthOK){
+    $Entry = ("... get the Republic Title Control Group $RTCtrlGrpName from the Republic Title Tenant")
+    fcn_AddLogEntry $Entry    
 
-#Call function which gets group and returns members
-[Array]$RTUsers=@()
-fcn_GetAzureGroup $RTAuthToken  $RTCtrlGrpGraphURL $RTCtrlGrpMembersGraphURL $RTCtrlGrpName $RTTenant
-    $IsValid = $Script:results.IsValid
-    $RTUsers = $Script:results.GrpMembers
-If(!($Isvalid)){
-    ffcn_AddErrorLogEntry "### Error occurred getting list from Republic Title of accounts to create as Guests on FA tenant ... stopping ###"
-    Return
-}
-fcn_AddErrorLogEntry ("... Republic Title Group has "+$RTUsers.count+" members")
+    #Call function which gets group and returns members
+    [Array]$RTUsers=@()
+    fcn_GetAzureGroup $RTAuthToken  $RTCtrlGrpGraphURL $RTCtrlGrpMembersGraphURL $RTCtrlGrpName $RTTenant
+        $IsValid = $Script:results.IsValid
+        $RTUsers = $Script:results.GrpMembers
+    If(!($Isvalid)){
+        ffcn_AddErrorLogEntry "### Error occurred getting list from Republic Title of accounts to create as Guests on FA tenant ... stopping ###"
+        fcn_SendMessage
+        
+    }
+    fcn_AddErrorLogEntry ("... Republic Title Group has "+$RTUsers.count+" members")
 
-##############################################################################
-# 3.4 Cycle through the list to create new guests
-##############################################################################
-[Array]$FAGuests=@()
-fcn_AddLogEntry ("... Get the Republic Title control group from FA Tenant")
-fcn_GetAzureGroup $FAauthToken  $FAtoRPGuestsGrpGraphURL $FAtoRPGuestsMembersURL $FAListofRPGuests_GrpName $FATenant
-    $IsValid = $Script:results.IsValid
-    $FAGuests = $Script:results.GrpMembers
+    ##############################################################################
+    # 3.4 Get list of RT users already in FA Tenant
+    ##############################################################################
+    [Array]$FAGuests=@()
+    fcn_AddLogEntry ("... Get the Republic Title control group from FA Tenant")
+    fcn_GetAzureGroup $FAauthToken  $FAtoRTGuestsGrpGraphURL $FAtoRTGuestsMembersURL $FAListofRTGuests_GrpName $FATenant
+        $IsValid = $Script:results.IsValid
+        $FAGuests = $Script:results.GrpMembers
 
-If(!($Isvalid)){
-    fcn_AddLogEntry "### Error occurred getting list of Republic Title FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
+    If(!($Isvalid)){
+        fcn_AddLogEntry "### Error occurred getting list of Republic Title FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
+    }
+    Else{
+        fcn_AddLogEntry ("... Republic Title FA Guest group has "+$FAGuests.count+" members in FA Tenant")
+        fcn_AddLogEntry "... "   
+    }
+
+    ##############################################################################
+    # 3.5 Cycle through the list to create new guests
+    ##############################################################################
+    fcn_AddLogEntry ("... ")
+    fcn_AddLogEntry ("... Cycle through the Republic Title Users")
+    fcn_ProcessUsers $RTUsers $RTTenant $RTAuthToken
+    fcn_AddLogEntry ("... ")
+    fcn_AddLogEntry ("... Done checking users from Republic Title, now look for stale guests")
+
+
+    ##############################################################################
+    # 3.6 Perform CRUD activities for Republic Title Guests
+    ##############################################################################
+    [Array]$FAGuests=@()
+    fcn_AddLogEntry ("... Get the Republic Title Warranty control group from FA Tenant")
+    fcn_GetAzureGroup $FAauthToken  $FAtoRTGuestsGrpGraphURL $FAtoRTGuestsMembersURL $FAListofRTGuests_GrpName $FATenant
+        $IsValid = $Script:results.IsValid
+        $FAGuests = $Script:results.GrpMembers
+    If(!($Isvalid)){
+        fcn_AddLogEntry "### Error occurred getting list of Republic Title FA Guests, unable to validate terminations or disabled accounts ... stopping ###"
+    }
+    Else{
+        fcn_AddLogEntry ("... Republic Title FA Guest group has "+$FAGuests.count+" members")
+        fcn_AddLogEntry ("... For now skip check for stale users")
+        #fcn_CheckForStaleUsers $RTUsers $FAGuests $RTAuthToken
+    }
+
+    fcn_AddLogEntry "... ------------------------------"
+    fcn_AddErrorLogEntry "... Finished Republic Title"
+    fcn_AddLogEntry "... ------------------------------"
+
 }
 Else{
-    fcn_AddLogEntry ("... Republic Title FA Guest group has "+$FAGuests.count+" members in FA Tenant")
-    fcn_AddLogEntry "... "   
+    fcn_AddErrorLogEntry "### Skipped Processing Republic Title"
 }
-
-##############################################################################
-# 3.5 Cycle through the list to create new guests
-##############################################################################
-fcn_AddLogEntry ("... ")
-fcn_AddLogEntry ("... Cycle through the Republic Title Users")
-
-fcn_ProcessUsers $RTUsers $RTTenant $RTAuthToken 
-fcn_AddLogEntry "... "
-fcn_AddLogEntry "... Done checking users from Republic Title, now look for stale guests"
-
-
-##############################################################################
-# 3.6 Perform CRUD activities for Republic Title Guests
-##############################################################################
-[Array]$FAGuests=@()
-fcn_AddLogEntry ("... Get the Republic Title Warranty control group from FA Tenant")
-fcn_GetAzureGroup $FAauthToken  $FAtoRTGuestsGrpGraphURL $FAtoRTGuestsMembersURL $FAListofRTGuests_GrpNamee $FATenant
-    $IsValid = $Script:results.IsValid
-    $FAGuests = $Script:results.GrpMembers
-If(!($Isvalid)){
-    fcn_AddLogEntry "### Error occurred getting list of Republic Title FA Guests, unable to validate terminations or disabled accounts ... stopping ###"
-}
-Else{
-    fcn_AddLogEntry ("... Republic Title FA Guest group has "+$FAGuests.count+" members")
-    #fcn_CheckForStaleUsers $RTUsers $FAGuests $RTAuthToken
-}
-
-fcn_AddLogEntry "... ------------------------------"
-fcn_AddErrorLogEntry "... Finished Republic Title"
-fcn_AddLogEntry "... ------------------------------"
 
 ################################################################################################################################
 # 4.0 Now start on First Canadian Trust to create new guests
@@ -1257,12 +1493,19 @@ $Script:HomeTenantLog = $Script:MissingAttribCan
 $FCTBody       = @{grant_type="client_credentials";resource=$resource;client_id=$FCTAppID;client_secret=$FCTSecret}
 Try{$FCTOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$FCTTenant/oauth2/token?api-version=1.0 -Body $FCTBody}
 Catch{
+    fcn_AddErrorLogEntry "########################################################"
     fcn_AddErrorLogEntry "### Auth for First Canadian Trust failed.. stopping ###"
     fcn_AddErrorLogEntry ("### # "+$Error.Exception+" ")    
-    Return 
+    fcn_AddErrorLogEntry "### "
+    fcn_AddErrorLogEntry "### Failure need updated FCT Secret ###"
+    fcn_AddErrorLogEntry "### Expired Secret need updated FCT Credentials      ###"
+    fcn_AddErrorLogEntry "########################################################"
+    fcn_SendMessage
+    $AuthOK=$false 
 }
 if ($null -ne $FCTOauth.access_token){
     $FCTAuthToken = @{'Authorization'="$($FCTOauth.token_type) $($FCTOauth.access_token)"}
+    $AuthOK=$true 
 }
 
 ##############################################################################
@@ -1276,6 +1519,9 @@ Try{$FAOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$FATenant/oaut
 Catch{
     fcn_AddErrorLogEntry "### Auth for FA failed.. stopping ###"
     fcn_AddErrorLogEntry ("### # "+$Error.Exception+" ")
+    fcn_AddErrorLogEntry "### "
+    fcn_AddErrorLogEntry "### Failure need updated FA Credentials ###"
+    fcn_SendMessage
     Return 
 }
 if ($null -ne $FAOauth.access_token){
@@ -1285,69 +1531,87 @@ if ($null -ne $FAOauth.access_token){
 ##############################################################################
 # 4.3 Get the members of the First Canadian Title control group
 ##############################################################################
-$Entry = ("... get the First Canadian Title $FCTCtrlGrpName from the fctca.onmicrosoft.com Tenant")
-fcn_AddLogEntry $Entry
-#out-file -FilePath $Script:LogPath\$Script:MissingAttribRT -InputObject "$DateTime  $Entry" -Append
+If($AuthOK){
+    $Entry = ("... get the First Canadian Title Control Group $FCTCtrlGrpName from the fctca.onmicrosoft.com Tenant")
+    fcn_AddLogEntry $Entry
+    #out-file -FilePath $Script:LogPath\$Script:MissingAttribRT -InputObject "$DateTime  $Entry" -Append
 
-#Call function which gets group and returns members
-[Array]$FCTUsers=@()
-fcn_GetAzureGroup $FCTAuthToken  $FCTCtrlGrpGraphURL $FCTCtrlGrpMembersGraphURL $FCTCtrlGrpName $FCTTenant
-    $IsValid = $Script:results.IsValid
-    $FCTUsers = $Script:results.GrpMembers
-If(!($Isvalid)){
-    ffcn_AddErrorLogEntry "### Error occurred getting list from First Canadian Title of accounts to create as Guests on FA tenant ... stopping ###"
-    Return
-}
+    #Call function which gets group and returns members
+    [Array]$FCTUsers=@()
+    fcn_GetAzureGroup $FCTAuthToken  $FCTCtrlGrpGraphURL $FCTCtrlGrpMembersGraphURL $FCTCtrlGrpName $FCTTenant
+        $IsValid = $Script:results.IsValid
+        $FCTUsers = $Script:results.GrpMembers
+    If(!($Isvalid)){
+        ffcn_AddErrorLogEntry "### Error occurred getting list from First Canadian Title of accounts to create as Guests on FA tenant ... stopping ###"
+        fcn_SendMessage
+        Return
+    }
 
-fcn_AddErrorLogEntry ("... First Canadian Title Group has "+$FCTUsers.count+" members")
-fcn_AddLogEntry ("... ")
+    fcn_AddErrorLogEntry ("... First Canadian Title Group has "+$FCTUsers.count+" members")
 
-##############################################################################
-# 4.4 Get list of HW users already in FA Tenant
-##############################################################################
+    ##############################################################################
+    # 4.4 Get list of FCT users already in FA Tenant
+    ##############################################################################
 
-[Array]$FAGuests=@()
-fcn_AddLogEntry ("... Get the First Canadian Title control group from FA Tenant")
-fcn_GetAzureGroup $FAauthToken  $FAtoFCTGuestsGrpGraphURL $FAtoFCTGuestsMembersURL $FAListofTCTGuests_GrpName $FATenant
-    $IsValid = $Script:results.IsValid
-    $FAGuests = $Script:results.GrpMembers
+    [Array]$FAGuests=@()
+    fcn_AddLogEntry ("... Get the First Canadian Title control group from FA Tenant")
+    fcn_GetAzureGroup $FAauthToken  $FAtoFCTGuestsGrpGraphURL $FAtoFCTGuestsMembersURL $FAListofFCTGuests_GrpName $FATenant
+        $IsValid = $Script:results.IsValid
+        $FAGuests = $Script:results.GrpMembers
 
-If(!($Isvalid)){
-    fcn_AddLogEntry "### Error occurred getting list of First Canadian Title FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
-}
-Else{
-    fcn_AddLogEntry ("... First Canadian Title FA Guest group has "+$FAGuests.count+" members in FA Tenant")
-    fcn_AddLogEntry "... "   
-}
+    If(!($Isvalid)){
+        fcn_AddLogEntry "### Error occurred getting list of First Canadian Title FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
+    }
+    Else{
+        fcn_AddLogEntry ("... First Canadian Title FA Guest group has "+$FAGuests.count+" members in FA Tenant")
+        fcn_AddLogEntry "... "   
+    }
 
-##############################################################################
-# 4.5 Cycle through the list to create new guests
-##############################################################################
-fcn_AddLogEntry ("... ")
-fcn_AddLogEntry ("... Cycle through the First Canadian Title Users")
+    ##############################################################################
+    # 4.5 Cycle through the list to create new guests
+    ##############################################################################
+    fcn_AddLogEntry ("... ")
+    fcn_AddLogEntry ("... Cycle through the First Canadian Title Users")    
+    fcn_ProcessUsers $FCTUsers $FCTTenant $FCTAuthToken 
+    fcn_AddLogEntry ("... ")
+    fcn_AddLogEntry ("... Done checking users from First Canadian Title, now look for stale guests")
 
-fcn_ProcessUsers $FCTUsers $FCTTenant $FCTAuthToken 
-fcn_AddLogEntry "... "
-fcn_AddLogEntry "... Done checking users from First Canadian Title, now look for stale guests"
-
-##############################################################################
-# 2.6 Perform CRUD activities for HW Guests
-##############################################################################
-If(!($Isvalid)){
-    #fcn_AddLogEntry "### Error occurred getting list of First Canadian Title FA Guests, unable to validate terminations or disabled accounts ... Skipping ###"
-}
-Else{
-    fcn_AddLogEntry ("... Check First Canadian Title Users for CRUD Activities")
+    ##############################################################################
+    # 4.6 Perform CRUD activities for FCT Guests
+    ##############################################################################
+    [Array]$FAGuests=@()
+    fcn_AddLogEntry ("... Get the Republic Title Warranty control group from FA Tenant")
+    fcn_GetAzureGroup $FAauthToken  $FAtoFCTGuestsGrpGraphURL $FAtoFCTGuestsMembersURL $FAListofFCTGuests_GrpNamee $FATenant
+        $IsValid = $Script:results.IsValid
+        $FAGuests = $Script:results.GrpMembers
+    If(!($Isvalid)){
+        fcn_AddLogEntry "### Error occurred getting list of FCT FA Guests in the FA Tenant, unable to validate terminations or disabled accounts ... stopping ###"
+    }
+    Else{
+        fcn_AddLogEntry ("... Republic Title FA Guest group has "+$FAGuests.count+" members")
+        fcn_AddLogEntry ("... For now skip check for stale users")
+        #fcn_CheckForStaleUsers $FCTUsers $FAGuests $FCTAuthToken
+    }
+    
+    fcn_AddErrorLogEntry "... "
+    fcn_AddLogEntry "... ------------------------------"
+    fcn_AddErrorLogEntry "... Finished First Canadian Title"
+    fcn_AddLogEntry "... ------------------------------"
     fcn_AddLogEntry "... "
-    #fcn_CheckForStaleUsers $HWUsers $FAGuests $HWauthToken
+}
+Else{
+    fcn_AddErrorLogEntry "### Skipped Processing First Canadian Title"
 }
 
-fcn_AddErrorLogEntry "... "
-fcn_AddLogEntry "... ------------------------------"
-fcn_AddErrorLogEntry "... Finished First Canadian Title"
-fcn_AddLogEntry "... ------------------------------"
-fcn_AddLogEntry "... "
+##############################################################################
+# Script completed
+##############################################################################
 
+#create control file
+$day = get-date -format dddd
+$datefile = $date+".txt"
+$DateTime = Get-Date
+out-file -FilePath $Script:LogPath\$datefile -InputObject $DateTime -Force
 
 fcn_AddErrorLogEntry " "
 fcn_AddErrorLogEntry "... script complete"
