@@ -50,6 +50,8 @@ Date		User        Ver	    Description
 05/27/2021  Flor H.     1.3     Added Eagle ID for HW, and allowed FCT users without employee IDs to be added
 6/10/2021   Flor H.     1.4     Added send mail on critical failure
 06/30/2021  Flor H.     1.5     Moved auth to function so they can be called if a token times out
+7/13/2021   Flor H.     1.6     When employeeID is missing code is unable to process user, added additional check for Null
+                                employeeID for FAHW and Rep Title, they are expected to have employeeID populated
 #############################################################################################>
 $Error.clear()
 #change the drive based on where the script is running
@@ -1063,7 +1065,7 @@ Function fcn_ProcessUsers{
                 #    fcn_AddErrorLogEntry ("### unknown error in get by EagleID for Republic Title - Skipping User")
                 #    $cntSkip++
                 #    Continue
-                }
+                #}
             }           
             ElseIf($FAGuests.EmployeeID -contains $Script:UserHomeDetail.EmployeeId){ 
                 $tmpUser = $FAGuests | Where-Object {$_.EmployeeID -eq $Script:UserHomeDetail.EmployeeId}
@@ -1232,13 +1234,13 @@ fcn_AddLogEntry "..."
 fcn_AddLogEntry "... ------------------------------"
 fcn_AddErrorLogEntry "... Starting Home Warranty"
 fcn_AddLogEntry "... ------------------------------"
-fcn_AddTenantUserLogEntry "... Auth to Home Warranty Tenant"
 
 ##############################################################################
 # 2.1 This is where we authenticate and get our access token for Home Warrenty
 ##############################################################################
 $Error.clear()
 $Script:HomeTenantLog = $Script:MissingAttribFAHW
+fcn_AddTenantUserLogEntry "... Auth to Home Warranty Tenant"
 
 $HWBody       = @{grant_type="client_credentials";resource=$resource;client_id=$HWappID;client_secret=$HWSecret}
 Try{$HWOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$HWTenant/oauth2/token?api-version=1.0 -Body $HWBody}
@@ -1355,12 +1357,12 @@ fcn_AddLogEntry "... "
 fcn_AddLogEntry "---------------------------------------"
 fcn_AddErrorLogEntry "... Starting Republic Title"
 fcn_AddLogEntry "---------------------------------------"
-fcn_AddTenantUserLogEntry "... Auth to Republic Title Tenant"
 
 ##############################################################################
 # 3.1 This is where we authenticate and get our access token for Republic title
 ##############################################################################
 $Script:HomeTenantLog = $Script:MissingAttribRT
+fcn_AddTenantUserLogEntry "... Auth to Republic Title Tenant"
 $Error.clear()
 
 $RTBody       = @{grant_type="client_credentials";resource=$resource;client_id=$RTAppID;client_secret=$RTSecret}
@@ -1482,13 +1484,13 @@ Else{
 fcn_AddLogEntry "... "
 fcn_AddErrorLogEntry "... Starting First Canadian Trust"
 fcn_AddLogEntry "---------------------------------------"
-fcn_AddTenantUserLogEntry "... Auth to First Canadian Trust"
 
 ##############################################################################
 # 4.1 This is where we authenticate and get our access token for Republic title
 ##############################################################################
 $Error.clear()
 $Script:HomeTenantLog = $Script:MissingAttribCan
+fcn_AddTenantUserLogEntry "... Auth to First Canadian Trust"
 
 $FCTBody       = @{grant_type="client_credentials";resource=$resource;client_id=$FCTAppID;client_secret=$FCTSecret}
 Try{$FCTOauth      = Invoke-RestMethod -Method POST -Uri $loginURL/$FCTTenant/oauth2/token?api-version=1.0 -Body $FCTBody}
